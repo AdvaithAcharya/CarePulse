@@ -1,44 +1,32 @@
 """
-MediaPipe-based multi-person pose estimator with a temporal wave-gesture detector.
-When a distress wave is detected for a mapped patient ID, it notifies the FastAPI backend.
-
-This module is intentionally written to be self-contained and easy to integrate:
-- Uses MediaPipe Tasks Pose Landmarker (LIVE_STREAM, num_poses=10)
-- Maps poses to patient zones (ward layout) using normalized coordinates
-- Implements temporal reversal-count logic on wrist movement relative to shoulder
-- Posts alerts asynchronously to http://localhost:8000/api/alert using httpx
-
-Note: This is a runnable reference. Model path and camera index may need adjustment.
+CarePulse Optimized AI Detector Module
+Lightweight Hand Bounding Box Detection with Motion-First Wake-Up Cascade
+and Frame Rate Decimation (~5 FPS AI Inference on 30 FPS Video Input).
 """
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import time
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 import cv2
 import httpx
-import os
+import numpy as np
 from dotenv import load_dotenv
-
-# Load environment variables from .env if present
-load_dotenv()
-
-# MediaPipe Tasks API
 import mediapipe as mp
-from mediapipe.tasks import python as mp_python
-from mediapipe.tasks.python import vision as mp_vision
+
+load_dotenv()
+logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-# Allow overriding the model path via env var POSE_LANDMARKER_TASK
-POSE_TASK_PATH = os.getenv("POSE_LANDMARKER_TASK", "models/pose_landmarker_full.task")  # Ensure the file exists
 CAMERA_INDEX = 0
-MAX_PERSONS = 10  # Multi-person detection
+BACKEND_ALERT_URL = os.getenv("BACKEND_ALERT_URL", "http://localhost:8000/api/alert")
 
-# Example ward zones (normalized [0,1] coordinates): xmin, ymin, xmax, ymax
+# Patient zones in normalized [0, 1] coordinates: (xmin, ymin, xmax, ymax)
 PATIENT_ZONES: Dict[str, Tuple[float, float, float, float]] = {
     "P-01": (0.00, 0.00, 0.33, 0.50),
     "P-02": (0.33, 0.00, 0.66, 0.50),
@@ -48,141 +36,260 @@ PATIENT_ZONES: Dict[str, Tuple[float, float, float, float]] = {
     "P-06": (0.66, 0.50, 1.00, 1.00),
 }
 
-# Temporal wave detection state per patient
-# Fields: count (# of reversals), last_direction (-1/0/+1), last_time (sec)
-WAVE_STATE: Dict[str, Dict[str, float]] = {}
+# Optimization settings
+AI_DECIMATION_INTERVAL = 6  # Process AI every 6th frame (~5 FPS at 30 FPS stream)
+MOTION_THRESHOLD = 0.015   # 1.5% pixel change in patient zone to trigger AI wake-up
+DELTA_X_THRESH = 0.05      # Horizontal hand movement threshold
+COUNT_TARGET = 3           # Direction reversals required for distress wave
+TIMEOUT_SEC = 3.0          # Seconds window for distress wave detection
 
-# Thresholds
-DELTA_X_THRESH = 0.08   # Horizontal wrist movement relative to shoulder (normalized)
-COUNT_TARGET = 3        # Reversal count target
-TIMEOUT_SEC = 3.0       # Time window to reach COUNT_TARGET
-
-BACKEND_ALERT_URL = "http://localhost:8000/api/alert"
 
 # -----------------------------------------------------------------------------
-# Utility functions
+# 1. Motion-First "Wake-Up" Cascade (Gatekeeper)
 # -----------------------------------------------------------------------------
+class MotionGatekeeper:
+    """Uses OpenCV frame differencing per PATIENT_ZONE to wake up AI only when motion occurs."""
 
-def get_patient_id(center_x: float, center_y: float) -> Optional[str]:
-    """Map a body center to a patient zone ID using PATIENT_ZONES.
-    center_x/center_y are normalized [0,1].
-    """
+    def __init__(self, diff_threshold: int = 25):
+        self.diff_threshold = diff_threshold
+        self.prev_zone_frames: Dict[str, np.ndarray] = {}
+
+    def check_motion(self, frame: np.ndarray, zones: Dict[str, Tuple[float, float, float, float]]) -> Dict[str, bool]:
+        """
+        Check for motion in each patient zone using background subtraction.
+
+        Returns:
+            Dict mapping zone_id -> bool (True if motion > MOTION_THRESHOLD)
+        """
+        h, w = frame.shape[:2]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+
+        active_zones: Dict[str, bool] = {}
+
+        for zone_id, (xmin, ymin, xmax, ymax) in zones.items():
+            # Convert normalized zone to pixel coordinates
+            px_xmin = int(xmin * w)
+            px_ymin = int(ymin * h)
+            px_xmax = int(xmax * w)
+            px_ymax = int(ymax * h)
+
+            zone_crop = gray[px_ymin:px_ymax, px_xmin:px_xmax]
+
+            if zone_crop.size == 0:
+                active_zones[zone_id] = False
+                continue
+
+            if zone_id not in self.prev_zone_frames:
+                self.prev_zone_frames[zone_id] = zone_crop
+                active_zones[zone_id] = True  # Initial frame triggers AI
+                continue
+
+            prev_crop = self.prev_zone_frames[zone_id]
+
+            # Ensure shapes match (in case of dynamic resize)
+            if prev_crop.shape != zone_crop.shape:
+                self.prev_zone_frames[zone_id] = zone_crop
+                active_zones[zone_id] = True
+                continue
+
+            # Compute frame difference
+            frame_diff = cv2.absdiff(prev_crop, zone_crop)
+            _, thresh = cv2.threshold(frame_diff, self.diff_threshold, 255, cv2.THRESH_BINARY)
+            
+            # Calculate ratio of pixels with motion
+            motion_pixels = cv2.countNonZero(thresh)
+            total_pixels = zone_crop.shape[0] * zone_crop.shape[1]
+            motion_ratio = motion_pixels / float(total_pixels) if total_pixels > 0 else 0.0
+
+            # Update reference frame
+            self.prev_zone_frames[zone_id] = zone_crop
+
+            # Active if motion exceeds threshold
+            active_zones[zone_id] = motion_ratio >= MOTION_THRESHOLD
+
+        return active_zones
+
+
+# -----------------------------------------------------------------------------
+# 2. Lightweight Hand Bounding Box Detector
+# -----------------------------------------------------------------------------
+class LightweightHandDetector:
+    """Lightweight Hand Detection using MediaPipe Hands for Bounding Box extraction."""
+
+    def __init__(self, max_hands: int = 4, min_detection_confidence: float = 0.5):
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=max_hands,
+            min_detection_confidence=min_detection_confidence,
+            min_tracking_confidence=0.5
+        )
+
+    def detect_hand_bboxes(self, frame: np.ndarray) -> List[Dict[str, float]]:
+        """
+        Detect hands and compute bounding boxes in normalized coordinates [0, 1].
+
+        Returns:
+            List of dicts containing bbox (xmin, ymin, xmax, ymax), center (x, y), and wrist (x, y)
+        """
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(rgb_frame)
+
+        detected_hands = []
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                xs = [lm.x for lm in hand_landmarks.landmark]
+                ys = [lm.y for lm in hand_landmarks.landmark]
+
+                xmin, xmax = max(0.0, min(xs)), min(1.0, max(xs))
+                ymin, ymax = max(0.0, min(ys)), min(1.0, max(ys))
+
+                cx = (xmin + xmax) / 2.0
+                cy = (ymin + ymax) / 2.0
+
+                wrist_lm = hand_landmarks.landmark[self.mp_hands.HandLandmark.WRIST]
+
+                detected_hands.append({
+                    "xmin": xmin,
+                    "ymin": ymin,
+                    "xmax": xmax,
+                    "ymax": ymax,
+                    "center_x": cx,
+                    "center_y": cy,
+                    "wrist_x": wrist_lm.x,
+                    "wrist_y": wrist_lm.y,
+                })
+
+        return detected_hands
+
+    def close(self):
+        self.hands.close()
+
+
+# -----------------------------------------------------------------------------
+# 3. Zone Mapping & Distress Wave Tracker
+# -----------------------------------------------------------------------------
+def get_patient_zone(center_x: float, center_y: float) -> Optional[str]:
+    """Map hand center coordinates to patient zone ID."""
     for pid, (xmin, ymin, xmax, ymax) in PATIENT_ZONES.items():
         if xmin <= center_x <= xmax and ymin <= center_y <= ymax:
             return pid
     return None
 
 
-def check_for_distress_wave(patient_id: str, shoulder: Tuple[float, float], wrist: Tuple[float, float]) -> bool:
-    """Temporal gesture detector: count direction reversals of wrist vs. shoulder.
+class DistressWaveTracker:
+    """Tracks horizontal movement reversals of hand bounding boxes per patient zone."""
 
-    Logic:
-    - Compute dx = wrist_x - shoulder_x (normalized)
-    - If |dx| > DELTA_X_THRESH, determine direction sign(dx)
-    - Increment count only on direction reversal
-    - Reset state if TIMEOUT_SEC exceeded since last event
-    - Return True when count reaches COUNT_TARGET within TIMEOUT_SEC
-    """
-    global WAVE_STATE
+    def __init__(self):
+        # WAVE_STATE per patient: {"count": int, "last_dir": int, "last_x": float, "last_time": float}
+        self.states: Dict[str, Dict[str, float]] = {}
 
-    now = time.monotonic()
-    dx = wrist[0] - shoulder[0]
-    direction = 1 if dx > DELTA_X_THRESH else (-1 if dx < -DELTA_X_THRESH else 0)
+    def update(self, patient_id: str, hand_x: float) -> bool:
+        now = time.monotonic()
+        state = self.states.get(patient_id, {"count": 0, "last_dir": 0, "last_x": hand_x, "last_time": now})
 
-    state = WAVE_STATE.get(patient_id, {"count": 0, "last_direction": 0, "last_time": 0.0})
+        # Reset on timeout
+        if (now - state["last_time"]) > TIMEOUT_SEC:
+            state = {"count": 0, "last_dir": 0, "last_x": hand_x, "last_time": now}
 
-    # Timeout reset
-    if state["last_time"] and (now - state["last_time"]) > TIMEOUT_SEC:
-        state = {"count": 0, "last_direction": 0, "last_time": 0.0}
+        dx = hand_x - state["last_x"]
+        curr_dir = 1 if dx > DELTA_X_THRESH else (-1 if dx < -DELTA_X_THRESH else 0)
 
-    if direction != 0:
-        if state["last_direction"] != 0 and direction != state["last_direction"]:
-            state["count"] += 1
-        state["last_direction"] = direction
-        state["last_time"] = now
+        if curr_dir != 0:
+            if state["last_dir"] != 0 and curr_dir != state["last_dir"]:
+                state["count"] += 1
+            state["last_dir"] = curr_dir
+            state["last_x"] = hand_x
+            state["last_time"] = now
 
-    WAVE_STATE[patient_id] = state
-    return state["count"] >= COUNT_TARGET
+        self.states[patient_id] = state
+        return state["count"] >= COUNT_TARGET
 
 
 # -----------------------------------------------------------------------------
-# Core processing
+# Backend Alert Notification
 # -----------------------------------------------------------------------------
-
 async def notify_backend(patient_id: str):
-    """Send alert to backend asynchronously using httpx."""
-    payload = {"patient_id": patient_id, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    """Send alert to backend asynchronously via HTTP POST."""
+    payload = {
+        "patient_id": patient_id,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "type": "gesture"
+    }
+    async with httpx.AsyncClient(timeout=3.0) as client:
         try:
-            await client.post(BACKEND_ALERT_URL, json=payload)
-        except Exception:
-            # Best-effort notify
-            pass
+            resp = await client.post(BACKEND_ALERT_URL, json=payload)
+            logger.info(f"Notified backend for patient {patient_id}: status {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Failed to send backend alert for {patient_id}: {e}")
 
 
-def create_pose_landmarker() -> mp_vision.PoseLandmarker:
-    base_options = mp_python.BaseOptions(model_asset_path=POSE_TASK_PATH)
-    options = mp_vision.PoseLandmarkerOptions(
-        base_options=base_options,
-        running_mode=mp_vision.RunningMode.IMAGE,  # Use synchronous IMAGE mode (no callback required)
-        num_poses=MAX_PERSONS,
-        min_pose_detection_confidence=0.5,
-        min_pose_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
-    return mp_vision.PoseLandmarker.create_from_options(options)
-
-
+# -----------------------------------------------------------------------------
+# Main Optimized Processing Loop (Standalone or Reference Worker)
+# -----------------------------------------------------------------------------
 async def run_live():
-    """Run live camera processing loop.
-    This function demonstrates how to plug the detector into the backend.
-    """
-    landmarker = create_pose_landmarker()
+    """Live camera processing loop with Decimation and Motion-First Cascade."""
+    gatekeeper = MotionGatekeeper()
+    detector = LightweightHandDetector()
+    tracker = DistressWaveTracker()
+
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
-        print("[ai_detector] Cannot open camera")
+        logger.error(f"[ai_detector] Cannot open camera index {CAMERA_INDEX}")
         return
+
+    frame_counter = 0
+    logger.info(f"AI Detector active. Decimation: every {AI_DECIMATION_INTERVAL} frames (~5 FPS AI inference).")
 
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
-                await asyncio.sleep(0)
+                await asyncio.sleep(0.01)
                 continue
 
-            # Convert to MediaPipe Image
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
+            frame_counter += 1
 
-            # Synchronous detection in IMAGE mode (no callback required)
-            result = landmarker.detect(mp_image)
+            # --- OPTIMIZATION 3: Frame Rate Decimation ---
+            # Stream runs at 30 FPS; AI executes only every Nth frame (~5 FPS)
+            if frame_counter % AI_DECIMATION_INTERVAL != 0:
+                await asyncio.sleep(0.001)
+                continue
 
-            poses = getattr(result, "pose_landmarks", []) or []
-            for pose in poses:
-                # Each pose is a list of landmarks with .x/.y/.z
-                lm = pose  # List of landmarks
-                if len(lm) <= 16:
+            # --- OPTIMIZATION 2: Motion-First Wake-Up Cascade ---
+            zone_motion = gatekeeper.check_motion(frame, PATIENT_ZONES)
+            active_zones = [zid for zid, has_motion in zone_motion.items() if has_motion]
+
+            if not active_zones:
+                # All patients still/sleeping - AI sleeps
+                await asyncio.sleep(0.001)
+                continue
+
+            # --- OPTIMIZATION 1: Lightweight Hand Bounding Box Detector ---
+            hands = detector.detect_hand_bboxes(frame)
+
+            for hand in hands:
+                pid = get_patient_zone(hand["center_x"], hand["center_y"])
+                if not pid or not zone_motion.get(pid, False):
                     continue
-                shoulder = (float(lm[11].x), float(lm[11].y))
-                wrist = (float(lm[16].x), float(lm[16].y))
 
-                # Estimate body center from hips/shoulders (simplified)
-                center_x = np.clip(np.mean([lm[11].x, lm[12].x, lm[23].x, lm[24].x]), 0.0, 1.0)
-                center_y = np.clip(np.mean([lm[11].y, lm[12].y, lm[23].y, lm[24].y]), 0.0, 1.0)
-                pid = get_patient_id(center_x, center_y)
-                if not pid:
-                    continue
-
-                if check_for_distress_wave(pid, shoulder, wrist):
+                # Check for distress wave
+                is_distress = tracker.update(pid, hand["wrist_x"])
+                if is_distress:
+                    logger.warning(f"Distress wave detected for Patient {pid}!")
                     await notify_backend(pid)
 
-            await asyncio.sleep(0)  # yield
+            await asyncio.sleep(0.001)
+
     finally:
+        detector.close()
         cap.release()
 
 
 if __name__ == "__main__":
-    # Run a short demo loop (press Ctrl+C to stop). Adjust CAMERA_INDEX and POSE_TASK_PATH.
+    logging.basicConfig(level=logging.INFO)
     try:
         asyncio.run(run_live())
     except KeyboardInterrupt:
-        pass
+        logger.info("AI Detector stopped by user.")

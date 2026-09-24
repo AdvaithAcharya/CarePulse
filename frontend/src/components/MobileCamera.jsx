@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import { LiquidMetalButton } from './ui/LiquidMetal';
 
-const API_BASE = 'http://localhost:8000';
+const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+const API_BASE = `http://${host}:8000`;
+const WS_BASE = `ws://${host}:8000`;
 
 export function MobileCamera() {
   const [rooms, setRooms] = useState([]);
@@ -13,6 +16,7 @@ export function MobileCamera() {
   const canvasRef = useRef(null);
   const streamIntervalRef = useRef(null);
   const mediaStreamRef = useRef(null);
+  const streamWsRef = useRef(null);
 
   useEffect(() => {
     fetchMobileRooms();
@@ -24,37 +28,60 @@ export function MobileCamera() {
   const fetchMobileRooms = async () => {
     try {
       const response = await axios.get(`${API_BASE}/api/rooms`);
-      const mobileRooms = response.data.filter(r => r.camera_url === 'mobile');
-      setRooms(mobileRooms);
-      if (mobileRooms.length > 0) {
-        setSelectedRoom(mobileRooms[0].id);
-      }
+      const dbRooms = response.data || [];
+      const mobileRooms = dbRooms.filter(r => r.camera_url === 'mobile');
+      
+      const allOptions = [
+        { id: 'screen-monitor-session', room_number: 'Screen Monitor (Default CCTV)', floor: 'Live' },
+        ...mobileRooms
+      ];
+      setRooms(allOptions);
+      setSelectedRoom('screen-monitor-session');
     } catch (error) {
       console.error('Error fetching rooms:', error);
+      setRooms([{ id: 'screen-monitor-session', room_number: 'Screen Monitor (Default CCTV)', floor: 'Live' }]);
+      setSelectedRoom('screen-monitor-session');
     }
   };
 
   const startStreaming = async () => {
-    if (!selectedRoom) {
-      alert('Please select a room first');
+    const targetRoom = selectedRoom || 'screen-monitor-session';
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const msg = "Mobile Browser Security Lock: Camera access is restricted on HTTP IP addresses.\n\n" +
+                  "Quick 10-second fix on Android Chrome:\n" +
+                  "1. Open new tab: chrome://flags/#unsafely-treat-insecure-origin-as-secure\n" +
+                  "2. Enable flag and add: http://" + host + ":5173\n" +
+                  "3. Tap Relaunch and try again!";
+      alert(msg);
       return;
     }
 
     try {
-      // Request camera access
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          facingMode: 'user',
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        },
-        audio: false
-      });
+      // Request mobile camera access with multi-level fallback
+      let stream = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false
+        });
+      } catch (e1) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user' },
+            audio: false
+          });
+        } catch (e2) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+          });
+        }
+      }
 
       mediaStreamRef.current = stream;
       videoRef.current.srcObject = stream;
       
-      // Wait for video to be ready
       await new Promise((resolve) => {
         videoRef.current.onloadedmetadata = () => {
           videoRef.current.play();
@@ -62,18 +89,31 @@ export function MobileCamera() {
         };
       });
 
+      // Connect binary WebSocket to backend at host IP
+      const wsUrl = `${WS_BASE}/api/streams/mobile/${targetRoom}/ws`;
+      const ws = new WebSocket(wsUrl);
+      streamWsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log("Mobile camera binary stream WebSocket connected to " + wsUrl);
+      };
+
       setStreaming(true);
       setStats({ framesSent: 0, alertsDetected: 0 });
 
-      // Start sending frames
+      // Start sending binary Blob frames over WebSocket
       const interval = 1000 / fps;
       streamIntervalRef.current = setInterval(() => {
-        captureAndSendFrame();
+        captureAndSendBinaryFrame();
       }, interval);
 
     } catch (error) {
       console.error('Error accessing camera:', error);
-      alert('Failed to access camera: ' + error.message);
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        alert('Camera Permission Denied! Please tap the lock icon in your browser address bar and allow Camera access.');
+      } else {
+        alert('Failed to access mobile camera (' + error.name + '): ' + error.message);
+      }
     }
   };
 
@@ -82,50 +122,37 @@ export function MobileCamera() {
       clearInterval(streamIntervalRef.current);
       streamIntervalRef.current = null;
     }
-
+    if (streamWsRef.current) {
+      streamWsRef.current.close();
+      streamWsRef.current = null;
+    }
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(track => track.stop());
       mediaStreamRef.current = null;
     }
-
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-
     setStreaming(false);
   };
 
-  const captureAndSendFrame = async () => {
+  const captureAndSendBinaryFrame = () => {
     if (!videoRef.current || !canvasRef.current) return;
-
     const canvas = canvasRef.current;
     const video = videoRef.current;
+    if (video.videoWidth === 0 || video.videoHeight === 0) return;
+
+    canvas.width = 480;
+    canvas.height = 270;
     const context = canvas.getContext('2d');
-
-    // Set canvas size to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    // Draw current frame
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Convert to base64
-    const frameData = canvas.toDataURL('image/jpeg', 0.8);
-
-    try {
-      const response = await axios.post(
-        `${API_BASE}/api/streams/mobile/${selectedRoom}/frame`,
-        { frame: frameData },
-        { timeout: 5000 }
-      );
-
-      setStats(prev => ({
-        framesSent: prev.framesSent + 1,
-        alertsDetected: prev.alertsDetected + (response.data.alerts_detected || 0)
-      }));
-    } catch (error) {
-      console.error('Error sending frame:', error);
-    }
+    canvas.toBlob((blob) => {
+      if (streamWsRef.current && streamWsRef.current.readyState === WebSocket.OPEN && blob) {
+        streamWsRef.current.send(blob);
+        setStats(prev => ({ ...prev, framesSent: prev.framesSent + 1 }));
+      }
+    }, 'image/jpeg', 0.5);
   };
 
   return (
@@ -137,38 +164,23 @@ export function MobileCamera() {
         </p>
       </div>
 
-      {rooms.length === 0 ? (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-          <h3 className="font-semibold text-yellow-800 mb-2">No Mobile Rooms Configured</h3>
-          <p className="text-yellow-700 mb-4">
-            You need to create a room with "mobile" as the camera URL first.
-          </p>
-          <a 
-            href="/rooms" 
-            className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 inline-block"
-          >
-            Go to Rooms Management
-          </a>
-        </div>
-      ) : (
-        <>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Select Room</label>
-                <select
-                  value={selectedRoom}
-                  onChange={(e) => setSelectedRoom(e.target.value)}
-                  disabled={streaming}
-                  className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                >
-                  {rooms.map(room => (
-                    <option key={room.id} value={room.id}>
-                      Room {room.room_number} {room.floor ? `(Floor ${room.floor})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
+      <div className="bg-white rounded-lg shadow p-6">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Select Target Stream Room</label>
+            <select
+              value={selectedRoom}
+              onChange={(e) => setSelectedRoom(e.target.value)}
+              disabled={streaming}
+              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+            >
+              {rooms.map(room => (
+                <option key={room.id} value={room.id}>
+                  {room.room_number} {room.floor ? `(${room.floor})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
 
               <div>
                 <label className="block text-sm font-medium mb-2">
@@ -189,21 +201,14 @@ export function MobileCamera() {
               </div>
 
               <div className="flex space-x-3">
-                {!streaming ? (
-                  <button
-                    onClick={startStreaming}
-                    className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-                  >
-                    Start Streaming
-                  </button>
-                ) : (
-                  <button
-                    onClick={stopStreaming}
-                    className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium"
-                  >
-                    Stop Streaming
-                  </button>
-                )}
+                <LiquidMetalButton
+                  onClick={streaming ? stopStreaming : startStreaming}
+                  borderWidth={4}
+                  size="md"
+                  innerClassName={streaming ? "bg-red-950 text-red-200" : "bg-neutral-950 text-white"}
+                >
+                  {streaming ? "Stop Streaming" : "Start Streaming"}
+                </LiquidMetalButton>
               </div>
             </div>
           </div>
@@ -254,8 +259,6 @@ export function MobileCamera() {
           )}
 
           <canvas ref={canvasRef} className="hidden" />
-        </>
-      )}
     </div>
   );
 }

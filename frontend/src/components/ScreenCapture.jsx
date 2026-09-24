@@ -1,182 +1,41 @@
-import { useState, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import axios from 'axios';
-import { useToast } from '../contexts/ToastContext';
-
-const API_BASE = 'http://localhost:8000';
-
-// Default monitoring session
-const MONITORING_SESSION_ID = 'screen-monitor-session';
+import { useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
+import { PageLayout, GlassCard } from './SharedLayout';
+import { LiquidMetalBorder, LiquidMetalButton } from './ui/LiquidMetal';
+import { useScreenCapture } from '../contexts/ScreenCaptureContext';
 
 export function ScreenCapture() {
-  const [capturing, setCapturing] = useState(false);
-  const [fps, setFps] = useState(10);
-  const [stats, setStats] = useState({ framesSent: 0, alertsDetected: 0 });
-  const [captureMode, setCaptureMode] = useState('window'); // 'screen' or 'window'
-  const [monitorName, setMonitorName] = useState('CCTV Monitor');
-  const toast = useToast();
-  
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const streamIntervalRef = useRef(null);
-  const mediaStreamRef = useRef(null);
+  const {
+    capturing,
+    startCapture,
+    stopCapture,
+    fps,
+    setFps,
+    stats,
+    captureMode,
+    setCaptureMode,
+    monitorName,
+    setMonitorName,
+    mobileFeedUrl,
+    mediaStream,
+    videoRef,
+    canvasRef
+  } = useScreenCapture();
 
-  const startCapture = async () => {
-
-    try {
-      // Request screen/window capture
-      const displayMediaOptions = {
-        video: {
-          cursor: 'never',
-          displaySurface: captureMode === 'window' ? 'window' : 'monitor',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      };
-
-      mediaStreamRef.current = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
-      videoRef.current.srcObject = mediaStreamRef.current;
-
-      await new Promise(resolve => {
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current.play();
-          resolve();
-        };
-      });
-
-      setCapturing(true);
-      setStats({ framesSent: 0, alertsDetected: 0 });
-
-      // Start sending frames
-      const interval = 1000 / fps;
-      streamIntervalRef.current = setInterval(() => {
-        captureAndSendFrame();
-      }, interval);
-
-      // Handle user stopping the share
-      mediaStreamRef.current.getVideoTracks()[0].addEventListener('ended', () => {
-        stopCapture();
-      });
-
-    } catch (error) {
-      console.error('Error starting screen capture:', error);
-      if (error.name === 'NotAllowedError') {
-        toast.error('Screen capture permission denied. Please allow screen sharing.');
-      } else {
-        toast.error('Failed to start screen capture: ' + error.message);
-      }
-    }
-  };
-
-  const stopCapture = () => {
-    if (streamIntervalRef.current) {
-      clearInterval(streamIntervalRef.current);
-      streamIntervalRef.current = null;
-    }
-
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-
-    if (videoRef.current) {
+  useEffect(() => {
+    if (videoRef?.current && mediaStream && captureMode !== 'mobile') {
+      videoRef.current.srcObject = mediaStream;
+      videoRef.current.play().catch(e => console.error("Error playing video:", e));
+    } else if (videoRef?.current) {
       videoRef.current.srcObject = null;
     }
-
-    setCapturing(false);
-  };
-
-  const captureAndSendFrame = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    const context = canvas.getContext('2d');
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    const frameData = canvas.toDataURL('image/jpeg', 0.8);
-
-    try {
-      const response = await axios.post(
-        `${API_BASE}/api/streams/mobile/${MONITORING_SESSION_ID}/frame`,
-        { frame: frameData },
-        { timeout: 5000 }
-      );
-
-      setStats(prev => ({
-        framesSent: prev.framesSent + 1,
-        alertsDetected: prev.alertsDetected + (response.data.alerts_detected || 0)
-      }));
-    } catch (error) {
-      // Silently continue on errors to not interrupt monitoring
-      if (stats.framesSent % 100 === 0) {
-        console.error('Error sending frame:', error);
-      }
-    }
-  };
+  }, [mediaStream, capturing, captureMode, videoRef]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50/50 via-blue-50/30 to-cyan-50/50 dark:from-neutral-900 dark:via-blue-900/10 dark:to-neutral-900 py-8">
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl">
-        {/* Hero Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-12"
-        >
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 200, damping: 15 }}
-            className="inline-block mb-4"
-          >
-            <div className="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-br from-purple-500 via-blue-500 to-cyan-500 flex items-center justify-center text-4xl shadow-2xl">
-              📹
-            </div>
-          </motion.div>
-          <h1 className="text-4xl sm:text-5xl font-bold mb-4">
-            <span className="bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent">
-              AI-Powered Screen Monitoring
-            </span>
-          </h1>
-          <p className="text-lg sm:text-xl text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">
-            Capture and analyze your screen in real-time with intelligent event detection
-          </p>
-        </motion.div>
-
-        {/* Quick Start Guide */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="mb-8 grid grid-cols-1 md:grid-cols-4 gap-4"
-        >
-          {[
-            { icon: '📺', title: 'Open CCTV', desc: 'Launch your monitoring app' },
-            { icon: '🎬', title: 'Start Capture', desc: 'Click the button below' },
-            { icon: '🖍️', title: 'Select Window', desc: 'Choose what to monitor' },
-            { icon: '🤖', title: 'AI Analyzes', desc: 'Automatic event detection' }
-          ].map((step, idx) => (
-            <motion.div
-              key={idx}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 + idx * 0.1 }}
-              whileHover={{ y: -5 }}
-              className="relative p-6 rounded-xl bg-white dark:bg-neutral-800 shadow-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden group"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-blue-500/5 to-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-              <div className="text-4xl mb-3 relative z-10">{step.icon}</div>
-              <div className="text-sm font-bold text-neutral-900 dark:text-white mb-1 relative z-10">{step.title}</div>
-              <div className="text-xs text-neutral-600 dark:text-neutral-400 relative z-10">{step.desc}</div>
-              <div className="absolute top-2 right-2 w-8 h-8 rounded-full bg-gradient-to-br from-purple-400/20 to-cyan-400/20 blur-xl"></div>
-            </motion.div>
-          ))}
-        </motion.div>
+    <PageLayout 
+      title="Screen Monitoring" 
+      subtitle="Capture and analyze your screen or mobile CCTV in real-time with intelligent hand tracking"
+    >
 
         {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -188,62 +47,104 @@ export function ScreenCapture() {
             transition={{ delay: 0.3 }}
             className="lg:col-span-1 space-y-6"
           >
-            <div className="card p-6">
-              <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
-                <span>⚙️</span> Settings
-              </h3>
+            <GlassCard strong className="p-8 relative overflow-hidden">
+              {/* inner glow */}
+              <div className="pointer-events-none absolute -top-24 left-1/2 h-[240px] w-[240px] -translate-x-1/2 rounded-full bg-white/[0.06] blur-[90px]" />
+              
+              <div className="relative z-10">
+                <div className="mb-10">
+                  <p className="text-xs uppercase tracking-[0.35em] text-white/40">Configuration</p>
+                  <h2 className="mt-3 text-4xl font-black tracking-[-0.05em] text-white">
+                    Settings
+                  </h2>
+                </div>
               <div className="space-y-5">
                 <div>
-                  <label className="block text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
-                    🎯 Monitor Name
+                  <label className="block text-sm font-semibold text-white mb-2">
+                    Monitor Name
                   </label>
                   <input
                     type="text"
                     value={monitorName}
                     onChange={(e) => setMonitorName(e.target.value)}
                     disabled={capturing}
-                    className="w-full px-4 py-3 border-2 border-neutral-200 dark:border-neutral-700 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-neutral-100 dark:disabled:bg-neutral-800 dark:bg-neutral-900 dark:text-white transition-all"
-                    placeholder="e.g., ICU Cameras"
+                    className="w-full px-4 py-3 border border-white/20 bg-white/5 text-white rounded-xl focus:ring-2 focus:ring-white/50 focus:border-transparent disabled:opacity-50 transition-all placeholder:text-white/30"
+                    placeholder="e.g., ICU Ward Cameras"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-3">
-                    🖼️ Capture Mode
+                  <label className="block text-sm font-semibold text-white mb-3">
+                    Capture Mode
                   </label>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {[
-                      { value: 'screen', label: '🖥️ Entire Screen', desc: 'Multiple CCTV views' },
-                      { value: 'window', label: '👀 Specific Window', desc: 'Single CCTV app' }
-                    ].map((mode) => (
-                      <label
-                        key={mode.value}
-                        className={`flex items-center p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                          captureMode === mode.value
-                            ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
-                            : 'border-neutral-200 dark:border-neutral-700 hover:border-purple-300'
-                        } ${capturing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        <input
-                          type="radio"
-                          value={mode.value}
-                          checked={captureMode === mode.value}
-                          onChange={(e) => setCaptureMode(e.target.value)}
-                          disabled={capturing}
-                          className="mr-3"
-                        />
-                        <div className="flex-1">
-                          <div className="text-sm font-medium text-neutral-900 dark:text-white">{mode.label}</div>
-                          <div className="text-xs text-neutral-500 dark:text-neutral-400">{mode.desc}</div>
+                      { value: 'camera', label: 'Web Camera Direct', desc: 'Local PC webcam stream' },
+                      { value: 'mobile', label: 'Mobile Phone Camera', desc: 'Stream live from phone web app' },
+                      { value: 'screen', label: 'Entire Screen', desc: 'Desktop monitor capture' }
+                    ].map((mode) => {
+                      const isSelected = captureMode === mode.value;
+                      return (
+                        <div key={mode.value} onClick={() => !capturing && setCaptureMode(mode.value)} className="cursor-pointer">
+                          {isSelected ? (
+                            <LiquidMetalBorder
+                              borderWidth={3}
+                              borderRadius="rounded-xl"
+                              innerClassName="p-3.5 bg-neutral-900/90 flex items-center"
+                            >
+                              <input
+                                type="radio"
+                                value={mode.value}
+                                checked={true}
+                                onChange={() => {}}
+                                disabled={capturing}
+                                className="mr-3"
+                              />
+                              <div className="flex-1">
+                                <div className="text-sm font-bold text-white">{mode.label}</div>
+                                <div className="text-xs text-white/70">{mode.desc}</div>
+                              </div>
+                            </LiquidMetalBorder>
+                          ) : (
+                            <div
+                              className={`flex items-center p-3.5 rounded-xl border border-white/10 hover:border-white/30 bg-white/[0.02] transition-all ${
+                                capturing ? 'opacity-50 cursor-not-allowed' : ''
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                value={mode.value}
+                                checked={false}
+                                onChange={() => {}}
+                                disabled={capturing}
+                                className="mr-3"
+                              />
+                              <div className="flex-1">
+                                <div className="text-sm font-bold text-white/80">{mode.label}</div>
+                                <div className="text-xs text-white/50">{mode.desc}</div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </label>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
+                {captureMode === 'mobile' && (
+                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs space-y-2">
+                    <p className="font-bold flex items-center gap-1.5 text-sm text-emerald-200">
+                      📱 Mobile Phone Stream Guide:
+                    </p>
+                    <p>1. Open this website on your mobile phone browser.</p>
+                    <p>2. Go to <strong>Mobile Camera</strong> page and tap <strong>Start Streaming</strong>.</p>
+                    <p>3. Tap <strong>Start Ward Monitoring</strong> below to preview the mobile stream with AI hand tracking & 10s Twilio alert!</p>
+                  </div>
+                )}
+
                 <div>
-                  <label className="block text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
-                    🎬 Frame Rate: {fps} FPS
+                  <label className="block text-sm font-semibold text-white mb-2">
+                    Frame Rate: {fps} FPS
                   </label>
                   <input
                     type="range"
@@ -252,36 +153,38 @@ export function ScreenCapture() {
                     value={fps}
                     onChange={(e) => setFps(parseInt(e.target.value))}
                     disabled={capturing}
-                    className="w-full h-2 bg-neutral-200 rounded-lg appearance-none cursor-pointer dark:bg-neutral-700 accent-purple-600 disabled:opacity-50"
+                    className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white disabled:opacity-50"
                   />
-                  <div className="flex justify-between text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                  <div className="flex justify-between text-xs text-white/50 mt-1">
                     <span>5 FPS</span>
-                    <span className="font-medium">Higher = Better detection</span>
+                    <span className="font-medium text-white/70">Higher = Better detection</span>
                     <span>30 FPS</span>
                   </div>
                 </div>
 
-                <motion.button
-                  onClick={capturing ? stopCapture : startCapture}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className={`w-full relative overflow-hidden text-white px-6 py-4 rounded-xl font-bold shadow-xl transition-all duration-300 group ${
-                    capturing
-                      ? 'bg-gradient-to-r from-red-600 via-pink-600 to-red-600'
-                      : 'bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600'
-                  }`}
-                >
-                  <span className="relative z-10 flex items-center justify-center gap-2 text-lg">
-                    {capturing ? '⬛ Stop Capture' : '🎬 Start Capture'}
-                  </span>
-                  <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${
-                    capturing
-                      ? 'bg-gradient-to-r from-pink-600 via-red-600 to-pink-600'
-                      : 'bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600'
-                  }`}></div>
-                </motion.button>
+                <div className="pt-2">
+                  <LiquidMetalButton
+                    onClick={capturing ? stopCapture : startCapture}
+                    size="lg"
+                    borderWidth={5}
+                    className="w-full"
+                    innerClassName={capturing ? "bg-red-950/90 text-red-200" : "bg-neutral-950 text-white"}
+                    icon={
+                      capturing ? (
+                        <span className="w-3 h-3 bg-red-500 rounded-full animate-ping" />
+                      ) : (
+                        <svg className="w-5 h-5 text-emerald-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      )
+                    }
+                  >
+                    {capturing ? 'Stop Ward Monitoring' : 'Start Ward Monitoring'}
+                  </LiquidMetalButton>
+                </div>
               </div>
-            </div>
+              </div>
+            </GlassCard>
           </motion.div>
 
           {/* Preview Section */}
@@ -291,25 +194,50 @@ export function ScreenCapture() {
             transition={{ delay: 0.4 }}
             className="lg:col-span-2"
           >
-            <div className="card overflow-hidden">
-              <div className="bg-gradient-to-r from-neutral-800 to-neutral-900 text-white px-6 py-4 flex justify-between items-center">
-                <h3 className="font-bold text-lg flex items-center gap-2">
-                  <span>📺</span> Live Preview
-                </h3>
+            <GlassCard className="p-8 relative overflow-hidden h-full">
+              {/* inner glow */}
+              <div className="pointer-events-none absolute -top-24 left-1/2 h-[240px] w-[240px] -translate-x-1/2 rounded-full bg-white/[0.06] blur-[90px]" />
+              
+              <div className="relative z-10 flex flex-col h-full">
+                <div className="mb-10 flex justify-between items-start">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.35em] text-white/40">Feed</p>
+                    <h2 className="mt-3 text-4xl font-black tracking-[-0.05em] text-white">
+                      Live Preview
+                    </h2>
+                  </div>
                 {capturing && (
-                  <span className="flex items-center space-x-2 bg-red-500/20 px-3 py-1 rounded-full">
-                    <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                    <span className="text-sm font-semibold">RECORDING</span>
+                  <span className="flex items-center space-x-2 bg-white/10 px-3 py-1 rounded-full border border-white/20">
+                    <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+                    <span className="text-sm font-semibold text-white">RECORDING</span>
                   </span>
                 )}
-              </div>
-              <div className="relative bg-neutral-900" style={{ aspectRatio: '16/9' }}>
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-contain"
-                  autoPlay
-                  playsInline
-                  muted
+                </div>
+
+              <LiquidMetalBorder
+                borderWidth={capturing ? 5 : 3}
+                borderRadius="rounded-[2rem]"
+                innerClassName="relative bg-black overflow-hidden flex items-center justify-center"
+                style={{ aspectRatio: '16/9' }}
+              >
+                {captureMode === 'mobile' && capturing && mobileFeedUrl ? (
+                  <img
+                    src={mobileFeedUrl}
+                    className="w-full h-full object-contain"
+                    alt="Mobile Phone Camera Stream"
+                  />
+                ) : (
+                  <video
+                    ref={videoRef}
+                    className="w-full h-full object-contain"
+                    autoPlay
+                    playsInline
+                    muted
+                  />
+                )}
+                <canvas
+                  ref={canvasRef}
+                  className="absolute inset-0 w-full h-full pointer-events-none object-contain"
                 />
                 {!capturing && (
                   <div className="absolute inset-0 flex items-center justify-center text-neutral-400">
@@ -319,19 +247,20 @@ export function ScreenCapture() {
                         animate={{ scale: 1, opacity: 1 }}
                         transition={{ delay: 0.2 }}
                       >
-                        <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-gradient-to-br from-purple-500/20 to-cyan-500/20 flex items-center justify-center">
+                        <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-white/10 flex items-center justify-center text-white">
                           <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                           </svg>
                         </div>
                         <p className="text-lg font-semibold mb-2">No capture active</p>
-                        <p className="text-sm text-neutral-500">Click "Start Capture" to begin monitoring</p>
+                        <p className="text-sm text-neutral-500">Click "Start Ward Monitoring" to begin monitoring</p>
                       </motion.div>
                     </div>
                   </div>
                 )}
+              </LiquidMetalBorder>
               </div>
-            </div>
+            </GlassCard>
           </motion.div>
         </div>
 
@@ -343,32 +272,21 @@ export function ScreenCapture() {
             transition={{ duration: 0.6 }}
             className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6"
           >
-                <motion.div 
-                  whileHover={{ scale: 1.05, y: -5 }}
-                  className="relative p-6 rounded-2xl bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-2 border-blue-200 dark:border-blue-700 overflow-hidden shadow-lg"
-                >
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-blue-400/20 rounded-full blur-2xl"></div>
-                  <div className="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-2 relative z-10">Frames Analyzed</div>
-                  <div className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent relative z-10">
+                <GlassCard className="p-6 border border-white/10">
+                  <div className="text-sm font-semibold text-white/70 mb-2 relative z-10">Frames Analyzed</div>
+                  <div className="text-3xl font-bold text-white relative z-10">
                     {stats.framesSent}
                   </div>
-                </motion.div>
-                <motion.div 
-                  whileHover={{ scale: 1.05, y: -5 }}
-                  className="relative p-6 rounded-2xl bg-gradient-to-br from-red-50 to-pink-50 dark:from-red-900/20 dark:to-pink-900/20 border-2 border-red-200 dark:border-red-700 overflow-hidden shadow-lg"
-                >
-                  <div className="absolute top-0 right-0 w-20 h-20 bg-red-400/20 rounded-full blur-2xl"></div>
-                  <div className="text-sm font-semibold text-red-700 dark:text-red-300 mb-2 relative z-10">Alerts Detected</div>
-                  <div className="text-3xl font-bold bg-gradient-to-r from-red-600 to-pink-600 bg-clip-text text-transparent relative z-10">
+                </GlassCard>
+                <GlassCard className="p-6 border border-white/10">
+                  <div className="text-sm font-semibold text-white/70 mb-2 relative z-10">Alerts Detected</div>
+                  <div className="text-3xl font-bold text-white relative z-10">
                     {stats.alertsDetected}
                   </div>
-              </motion.div>
+              </GlassCard>
             </motion.div>
         )}
-
-        <canvas ref={canvasRef} className="hidden" />
-      </div>
-    </div>
+    </PageLayout>
   );
 }
 

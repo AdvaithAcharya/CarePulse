@@ -54,7 +54,6 @@ export const exportAlertsToCSV = (alerts) => {
 export const exportContactsToCSV = (contacts) => {
   const exportData = contacts.map(contact => ({
     'Name': contact.name,
-    'Role': contact.role,
     'Phone': contact.phone_number,
     'Email': contact.email || 'N/A',
     'Priority': contact.priority,
@@ -87,7 +86,7 @@ export const exportAlertsToPDF = async (alerts, options = {}) => {
     const doc = new jsPDF();
     
     const {
-      title = 'GuardianAI Alert Report',
+      title = 'CarePulse Alert Report',
       subtitle = `Generated on ${new Date().toLocaleString()}`,
       includeCharts = false
     } = options;

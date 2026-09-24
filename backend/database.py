@@ -18,23 +18,18 @@ class Database:
         self.db: Optional[AsyncIOMotorDatabase] = None
     
     async def connect(self):
-        """Connect to MongoDB"""
-        try:
-            # Use MONGO_URI if available, otherwise fall back to MONGODB_URL
-            mongodb_url = settings.MONGO_URI if settings.MONGO_URI else settings.MONGODB_URL
-            self.client = AsyncIOMotorClient(mongodb_url)
-            self.db = self.client[settings.MONGODB_DB_NAME]
-            
-            # Test connection
-            await self.client.admin.command('ping')
-            logger.info(f"Connected to MongoDB: {settings.MONGODB_DB_NAME}")
-            
-            # Create indexes
-            await self._create_indexes()
-            
-        except Exception as e:
-            logger.error(f"Failed to connect to MongoDB: {e}")
-            raise
+        """Connect directly to the configured MongoDB Atlas database"""
+        mongodb_url = settings.MONGO_URI if settings.MONGO_URI else settings.MONGODB_URL
+        if not mongodb_url:
+            raise ValueError("No MONGO_URI specified in environment")
+        
+        self.client = AsyncIOMotorClient(mongodb_url, serverSelectionTimeoutMS=10000)
+        await self.client.admin.command('ping')
+        self.db = self.client[settings.MONGODB_DB_NAME]
+        logger.info(f"Successfully connected to MongoDB Atlas database: {settings.MONGODB_DB_NAME}")
+        
+        # Create indexes
+        await self._create_indexes()
     
     async def disconnect(self):
         """Disconnect from MongoDB"""
@@ -61,11 +56,17 @@ class Database:
             await self.db.alerts.create_index("status")
             await self.db.alerts.create_index([("acknowledged", 1), ("timestamp", -1)])
             
-            # Patients indexes
-            await self.db.patients.create_index("room_id", unique=True)
-            
-            # Rooms indexes
-            await self.db.rooms.create_index("room_number", unique=True)
+            # Drop obsolete collections if they exist
+            try:
+                colls = await self.db.list_collection_names()
+                if "patients" in colls:
+                    await self.db.patients.drop()
+                    logger.info("Dropped obsolete 'patients' collection")
+                if "rooms" in colls:
+                    await self.db.rooms.drop()
+                    logger.info("Dropped obsolete 'rooms' collection")
+            except Exception as e:
+                logger.debug(f"Non-fatal error checking/dropping obsolete collections: {e}")
             
             # Contacts indexes
             try:

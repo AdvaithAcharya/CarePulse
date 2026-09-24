@@ -45,24 +45,24 @@ export const themes = {
 
 export const ThemeProvider = ({ children }) => {
   const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem('guardian-theme');
+    const saved = localStorage.getItem('carepulse-theme');
     return saved || 'light';
   });
   
   const [fontSize, setFontSize] = useState(() => {
-    return localStorage.getItem('guardian-font-size') || 'medium';
+    return localStorage.getItem('carepulse-font-size') || 'medium';
   });
   
   const [highContrast, setHighContrast] = useState(() => {
-    return localStorage.getItem('guardian-high-contrast') === 'true';
+    return localStorage.getItem('carepulse-high-contrast') === 'true';
   });
   
   const [reducedMotion, setReducedMotion] = useState(() => {
-    return localStorage.getItem('guardian-reduced-motion') === 'true';
+    return localStorage.getItem('carepulse-reduced-motion') === 'true';
   });
 
   useEffect(() => {
-    localStorage.setItem('guardian-theme', theme);
+    localStorage.setItem('carepulse-theme', theme);
     const root = document.documentElement;
     
     // Remove all theme classes
@@ -73,7 +73,7 @@ export const ThemeProvider = ({ children }) => {
   }, [theme]);
   
   useEffect(() => {
-    localStorage.setItem('guardian-font-size', fontSize);
+    localStorage.setItem('carepulse-font-size', fontSize);
     const root = document.documentElement;
     root.classList.remove('text-sm', 'text-base', 'text-lg', 'text-xl');
     const fontSizeClasses = {
@@ -86,12 +86,12 @@ export const ThemeProvider = ({ children }) => {
   }, [fontSize]);
   
   useEffect(() => {
-    localStorage.setItem('guardian-high-contrast', highContrast);
+    localStorage.setItem('carepulse-high-contrast', highContrast);
     document.documentElement.classList.toggle('high-contrast', highContrast);
   }, [highContrast]);
   
   useEffect(() => {
-    localStorage.setItem('guardian-reduced-motion', reducedMotion);
+    localStorage.setItem('carepulse-reduced-motion', reducedMotion);
     document.documentElement.classList.toggle('reduce-motion', reducedMotion);
   }, [reducedMotion]);
 

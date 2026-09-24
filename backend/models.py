@@ -1,5 +1,5 @@
 """
-Pydantic models for GuardianAI
+Pydantic models for CarePulse
 """
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -22,57 +22,14 @@ class AlertStatus(str, Enum):
     ESCALATED = "escalated"
 
 
-class Patient(BaseModel):
-    """Patient model"""
-    id: Optional[str] = Field(None, alias="_id")
-    name: str
-    age: Optional[int] = None
-    room_id: str
-    medical_notes: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    class Config:
-        populate_by_name = True
-        json_schema_extra = {
-            "example": {
-                "name": "John Doe",
-                "age": 72,
-                "room_id": "room_101",
-                "medical_notes": "Post-surgery recovery"
-            }
-        }
-
-
-class Room(BaseModel):
-    """Room model"""
-    id: Optional[str] = Field(None, alias="_id")
-    room_number: str
-    floor: Optional[int] = None
-    camera_url: str
-    camera_enabled: bool = True
-    privacy_enabled: bool = True
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    class Config:
-        populate_by_name = True
-        json_schema_extra = {
-            "example": {
-                "room_number": "101",
-                "floor": 1,
-                "camera_url": "rtsp://192.168.1.100:554/stream",
-                "camera_enabled": True,
-                "privacy_enabled": True
-            }
-        }
 
 
 class Contact(BaseModel):
     """Nurse/Doctor contact model"""
     id: Optional[str] = Field(None, alias="_id")
     name: str
-    role: str  # "nurse", "doctor", "emergency"
-    # Require E.164 format (e.g., +15551234567)
-    phone_number: str = Field(..., pattern=r"^\+[1-9]\d{7,14}$")
+    role: Optional[str] = "staff"
+    phone_number: str
     firebase_token: Optional[str] = None
     email: Optional[str] = None
     priority: int = 1  # Lower number = higher priority for escalation
@@ -99,7 +56,7 @@ class Alert(BaseModel):
     """Alert model"""
     id: Optional[str] = Field(None, alias="_id")
     alert_type: AlertType
-    room_id: str
+    room_id: Optional[str] = None
     patient_id: Optional[str] = None
     description: str
     status: AlertStatus = AlertStatus.ACTIVE

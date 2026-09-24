@@ -1,431 +1,235 @@
-# GuardianAI – Low-Cost, Privacy-First Patient Distress Detection System
+# Care Pulse – Intelligent Patient Distress Detection System for Hospital Wards
 
-![GuardianAI Banner](https://img.shields.io/badge/GuardianAI-Patient%20Safety-blue)
+![Care Pulse Banner](https://img.shields.io/badge/Care%20Pulse-Patient%20Safety-blue)
 ![Python](https://img.shields.io/badge/Python-3.8+-green)
 ![React](https://img.shields.io/badge/React-18+-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-AI%20Vision-FF6F00)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-## 🚀 Overview
+## 🏥 Overview
 
-GuardianAI is a complete full-stack AI-powered patient monitoring system that converts existing CCTV/IP webcams into intelligent patient distress detection systems. It provides gesture, voice, and fall detection with real-time alerts sent to nurses and doctors via multiple channels.
+**Care Pulse** is an automated, privacy-first patient distress detection system built for hospital wards. In critical medical environments, patients experiencing acute distress or needing urgent assistance often cannot reach physical call buttons or shout for help.
 
-### Key Features
+In Care Pulse-equipped wards, patients are instructed to **raise their hand continuously for more than 10 seconds** if they are in distress or need help. 
 
-- **🎯 Multi-Modal AI Detection**
-  - Gesture detection (wave/tap) using MediaPipe
-  - Voice keyword detection using Vosk (offline)
-  - Fall detection using pose estimation
-  
-- **🔒 Privacy-First Architecture**
-  - Real-time face blurring on video feeds
-  - Local AI processing (no cloud storage)
-  - Only alert logs stored in database
+Care Pulse runs directly on the ward's monitor system, capturing live CCTV and video feeds in real-time. The AI vision engine continuously monitors patient postures, computes real-time bounding boxes with continuous hand-raise duration tracking, applies face-blurring privacy filters, and instantly escalates confirmed distress events to assigned nurses through automated voice calls and live dashboard notifications.
 
-- **📱 Multi-Channel Alerts**
-  - Firebase push notifications with continuous alerts
-  - Twilio voice calls to landlines
-  - Escalation logic with priority-based contacts
-  
-- **🏥 Multi-Room Support**
-  - Handle multiple IP camera streams simultaneously
-  - Room-based patient management
-  - Concurrent video processing
+---
 
-- **💻 Real-Time Dashboard**
-  - Live video feeds with privacy filtering
-  - Active alert management
-  - Alert history and logs
-  - Nurse/doctor contacts management
+## ✨ Key Capabilities
 
-## 📋 Table of Contents
+- **⏱️ 10-Second Sustained Distress Detection**
+  - Uses MediaPipe ultra-fast pose and hand tracking (~15ms per frame) to measure continuous hand elevation above shoulder level.
+  - Requires continuous hand raising for **$\ge$ 10.0 seconds** before triggering an alert, eliminating false alarms from casual movements or momentary waves.
+  - Real-time on-screen countdown and duration visualizer tracks the distress gesture live on the monitor feed.
 
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [API Documentation](#api-documentation)
-- [Deployment](#deployment)
-- [Contributing](#contributing)
-- [License](#license)
+- **🔒 Privacy-First Face Anonymization**
+  - Real-time OpenCV Gaussian face blurring anonymizes patient faces before frames are displayed or broadcasted.
+  - Video streams are processed locally in volatile memory without cloud video storage, ensuring compliance with patient dignity and healthcare privacy standards.
+
+- **📞 Targeted Nurse Alerting & Voice Escalation**
+  - **Twilio Voice Calls**: Automatically dials active nurses registered in Care Pulse's Contact Management system with automated emergency voice alerts.
+  - **WebSocket Live Feeds**: Instantly pushes alert banners and audio cues to the hospital ward monitoring dashboard (`ws://localhost:8000/ws`).
+  - **Global Deduplication & Cooldown**: Prevents alert fatigue by applying a 60–120 second cooldown per patient/ward feed.
+
+- **🖥️ Live CCTV Ward Monitoring Dashboard**
+  - Real-time CCTV streaming with low latency via binary WebSockets and MJPEG.
+  - Responsive dark-mode dashboard with live alert feeds, acknowledgement workflows, system telemetry, and contact management.
+
+---
 
 ## 🏗️ Architecture
 
 ```
-GuardianAI/
-├── backend/                    # Python FastAPI Backend
-│   ├── ai/                    # AI Detection Modules
-│   │   ├── gesture_detection.py
-│   │   ├── voice_detection.py
-│   │   ├── fall_detection.py
-│   │   └── privacy_filter.py
-│   ├── api/                   # REST API Endpoints
-│   │   ├── alerts.py
-│   │   ├── patients.py
-│   │   ├── rooms.py
-│   │   ├── contacts.py
-│   │   └── streams.py
-│   ├── main.py               # FastAPI Application
-│   ├── config.py             # Configuration
-│   ├── database.py           # MongoDB Connection
-│   ├── models.py             # Data Models
-│   ├── alert_manager.py      # Alert System
-│   ├── video_processor.py    # Video Stream Handler
-│   └── requirements.txt      # Python Dependencies
+CarePulse/
+├── backend/                        # Python FastAPI Backend
+│   ├── ai/                        # AI Vision Detection Pipeline
+│   │   ├── gesture_detection.py   # MediaPipe 10-second hand raise tracker
+│   │   ├── ai_detector.py         # Motion gatekeeper & bounding box extraction
+│   │   └── privacy_filter.py      # Real-time face blurring filter
+│   ├── api/                       # REST & WebSocket API Endpoints
+│   │   ├── alerts.py              # Alert query, acknowledge, resolve endpoints
+│   │   ├── contacts.py            # Nurse/doctor contact CRUD operations
+│   │   └── streams.py             # Binary WebSocket & MJPEG video streaming
+│   ├── alert_manager.py           # Multi-channel notification & Twilio escalation
+│   ├── video_processor.py         # Multi-stream frame ingest & AI worker
+│   ├── database.py                # MongoDB Atlas connection & index management
+│   ├── models.py                  # Pydantic schemas (Alert, Contact, AlertLog)
+│   ├── config.py                  # Environment settings & thresholds
+│   ├── main.py                    # FastAPI application entry point
+│   └── requirements.txt           # Python dependencies
 │
-├── frontend/                  # React Dashboard
+├── frontend/                      # Modern React 18 Dashboard
 │   ├── src/
-│   │   ├── components/       # React Components
-│   │   │   ├── Dashboard.jsx
-│   │   │   ├── AlertsPanel.jsx
-│   │   │   ├── VideoGrid.jsx
-│   │   │   ├── ContactsManager.jsx
-│   │   │   └── Sidebar.jsx
-│   │   ├── App.jsx          # Main App
-│   │   └── index.css        # TailwindCSS Styles
+│   │   ├── pages/                 # Landing, Dashboard, Notifications, Settings
+│   │   ├── components/            # ScreenCapture, ContactsManager, VideoGrid, SystemHealth
+│   │   ├── contexts/              # ScreenCaptureContext, ThemeContext, ToastContext
+│   │   ├── hooks/                 # useKeyboardShortcuts, useLocalStorage
+│   │   ├── utils/                 # alertSounds, exportUtils
+│   │   ├── App.jsx                # Main application router
+│   │   └── index.css              # Styling & design system tokens
 │   ├── package.json
-│   └── tailwind.config.js
+│   └── vite.config.js
 │
-├── README.md
-└── .gitignore
+├── SETUP.md                       # Complete setup & deployment guide
+├── PROJECT_PROGRESS.md            # Detailed progress report & audit
+├── start.ps1                      # Single-command startup script
+└── README.md
 ```
 
-### Data Flow
+### Data Pipeline
 
 ```
-Camera Stream → AI Detection → Alert Creation → Multi-Channel Notification → Dashboard Update
-                     ↓                              ↓
-              Privacy Filter                  MongoDB Logging
+CCTV Live Feed
+      │
+      ▼
+[ Privacy Filter (Face Blur) ]
+      │
+      ▼
+[ AI Gesture Engine: Wrist Elevation Tracking ]
+      │
+      ├── Hand Raised < 10s ───► Live Monitor Duration Timer (No Alert)
+      │
+      └── Hand Raised ≥ 10s ───► 🚨 PATIENT DISTRESS CONFIRMED
+                                          │
+                  ┌───────────────────────┴───────────────────────┐
+                  ▼                                               ▼
+         [ MongoDB Atlas ]                             [ Alert Dispatcher ]
+       (Logged to 'alerts')                                       │
+                                          ┌───────────────────────┴───────────────────────┐
+                                          ▼                                               ▼
+                              [ Twilio Voice Call ]                             [ WebSocket Broadcast ]
+                          (Assigned Nurse Contacts)                           (Ward Monitoring Dashboard)
 ```
+
+---
 
 ## 🛠️ Tech Stack
 
-### Backend / AI Engine
-- **Python 3.8+**
-- **FastAPI** - High-performance async API framework
-- **OpenCV** - Video processing
-- **MediaPipe** - Gesture and pose detection
-- **Vosk** - Offline speech recognition
-- **Motor** - Async MongoDB driver
-- **Firebase Admin SDK** - Push notifications
-- **Twilio** - Voice calls
-- **MongoDB Atlas** - Database
+### Backend & AI Engine
+- **FastAPI**: Asynchronous Python API and WebSocket server.
+- **MediaPipe**: Real-time pose and hand landmark tracking.
+- **OpenCV (`cv2`)**: Frame acquisition, image processing, and Gaussian blurring.
+- **Motor / PyMongo**: Asynchronous MongoDB Atlas client.
+- **Twilio SDK**: Automated voice calls to nurse phone numbers.
+- **Pydantic v2**: High-performance data validation and typing.
 
-### Frontend
-- **React 18+** - UI framework
-- **TailwindCSS v3** - Styling
-- **Vite** - Build tool
-- **WebSocket** - Real-time communication
-- **Axios** - HTTP client
+### Frontend Dashboard
+- **React 18**: UI component library.
+- **Vite**: Modern development server and build tool.
+- **TailwindCSS**: Responsive medical UI styling.
+- **Framer Motion**: Smooth micro-interactions and transitions.
+- **HTML5 Canvas & WebSockets**: Low-latency video canvas rendering and real-time streaming.
 
-## 📦 Installation
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
+- Python 3.8+ (Tested on Python 3.12)
+- Node.js 16+ & npm
+- MongoDB Atlas or local MongoDB instance
 
-- Python 3.8 or higher
-- Node.js 16+ and npm
-- MongoDB (local or Atlas)
-- Git
-
-### 1. Clone the Repository
-
-```bash
-git clone <repository-url>
-cd GuardianAI
+### Automated Start (Windows)
+```powershell
+.\start.ps1
 ```
 
-### 2. Backend Setup
+### Manual Start
 
-```bash
+#### 1. Backend
+```powershell
 cd backend
-
-# Create virtual environment
 python -m venv venv
-
-# Activate virtual environment
-# Windows:
-venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
-
-# Install dependencies
+.\venv\Scripts\activate
 pip install -r requirements.txt
-
-# Download Vosk model (for voice detection)
-# Visit: https://alphacephei.com/vosk/models
-# Download vosk-model-small-en-us-0.15
-# Extract to backend/models/
-
-# Copy environment file
-copy .env.example .env
-
-# Edit .env with your configuration
-notepad .env
+python main.py
 ```
+- **Backend API**: `http://localhost:8000`
+- **Interactive Swagger Docs**: `http://localhost:8000/docs`
 
-### 3. Frontend Setup
-
-```bash
-cd ../frontend
-
-# Install dependencies
+#### 2. Frontend
+```powershell
+cd frontend
 npm install
-
-# Install additional required packages
-npm install react-router-dom axios
-
-# Copy environment file
-copy .env.example .env
-
-# Edit .env if needed
-notepad .env
+npm run dev
 ```
+- **Ward Dashboard**: `http://localhost:5173`
 
-### 4. Database Setup
+---
 
-#### Option A: Local MongoDB
-
-```bash
-# Install MongoDB Community Edition
-# Windows: https://www.mongodb.com/try/download/community
-# Start MongoDB service
-net start MongoDB
-```
-
-#### Option B: MongoDB Atlas (Cloud)
-
-1. Create account at https://www.mongodb.com/cloud/atlas
-2. Create a free cluster
-3. Get connection string
-4. Update `MONGODB_URL` in backend/.env
-
-## ⚙️ Configuration
-
-### Backend Configuration (backend/.env)
+## ⚙️ Configuration (`backend/.env`)
 
 ```env
 # Application
+APP_NAME=CarePulse
 DEBUG=True
 HOST=0.0.0.0
 PORT=8000
 
-# MongoDB
-MONGODB_URL=mongodb://localhost:27017
-MONGODB_DB_NAME=guardianai
+# MongoDB Atlas
+MONGO_URI=mongodb+srv://<username>:<password>@cluster.mongodb.net/?appName=Cluster1
+MONGODB_DB_NAME=carepulse
 
-# Firebase (Optional - for push notifications)
-FIREBASE_CREDENTIALS_PATH=path/to/firebase-credentials.json
-FIREBASE_PROJECT_ID=your-project-id
-
-# Twilio (Optional - for voice calls)
-TWILIO_ACCOUNT_SID=your_account_sid
-TWILIO_AUTH_TOKEN=your_auth_token
+# Twilio (Voice Alert Calls to Nurses)
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_PHONE_NUMBER=+1234567890
-
-# AI Detection Settings
-GESTURE_THRESHOLD=3          # Number of waves to trigger alert
-FALL_HEIGHT_THRESHOLD=0.3    # Height drop percentage
-VOICE_KEYWORDS=["help", "nurse", "doctor", "emergency"]
 
 # Privacy
 ENABLE_FACE_BLUR=True
+BLUR_KERNEL_SIZE=51
 ```
-
-### Firebase Setup (Optional)
-
-1. Create project at https://console.firebase.google.com/
-2. Download service account key (JSON)
-3. Save to backend/ directory
-4. Update `FIREBASE_CREDENTIALS_PATH` in .env
-
-### Twilio Setup (Optional)
-
-1. Create account at https://www.twilio.com/
-2. Get Account SID and Auth Token
-3. Get phone number
-4. Update Twilio settings in .env
-
-## 🚀 Usage
-
-### Start Backend
-
-```bash
-cd backend
-python main.py
-```
-
-Backend will be available at: http://localhost:8000
-
-### Start Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-Frontend will be available at: http://localhost:5173
-
-### Access Dashboard
-
-Navigate to http://localhost:5173 in your browser
-
-## 📡 API Documentation
-
-### Alerts Endpoints
-
-```
-GET    /api/alerts              # Get all alerts
-GET    /api/alerts/{id}         # Get specific alert
-POST   /api/alerts/{id}/acknowledge  # Acknowledge alert
-POST   /api/alerts/{id}/resolve      # Resolve alert
-GET    /api/alerts/{id}/logs    # Get alert logs
-```
-
-### Rooms Endpoints
-
-```
-GET    /api/rooms               # Get all rooms
-POST   /api/rooms               # Create room
-GET    /api/rooms/{id}          # Get specific room
-PUT    /api/rooms/{id}          # Update room
-DELETE /api/rooms/{id}          # Delete room
-```
-
-### Video Streams Endpoints
-
-```
-POST   /api/streams/start       # Start video stream
-POST   /api/streams/stop/{room_id}  # Stop stream
-GET    /api/streams/{room_id}/frame # Get latest frame
-GET    /api/streams/{room_id}/stream # MJPEG stream
-```
-
-### Patients Endpoints
-
-```
-GET    /api/patients            # Get all patients
-POST   /api/patients            # Create patient
-GET    /api/patients/{id}       # Get patient
-PUT    /api/patients/{id}       # Update patient
-DELETE /api/patients/{id}       # Delete patient
-```
-
-### Contacts Endpoints
-
-```
-GET    /api/contacts            # Get all contacts
-POST   /api/contacts            # Create contact
-GET    /api/contacts/{id}       # Get contact
-PUT    /api/contacts/{id}       # Update contact
-DELETE /api/contacts/{id}       # Delete contact
-```
-
-### WebSocket
-
-```
-WS     /ws                      # Real-time updates
-```
-
-## 🏥 Testing the System
-
-### 1. Add a Room
-
-```bash
-curl -X POST http://localhost:8000/api/rooms \
-  -H "Content-Type: application/json" \
-  -d '{
-    "room_number": "101",
-    "floor": 1,
-    "camera_url": "0",
-    "camera_enabled": true,
-    "privacy_enabled": true
-  }'
-```
-
-### 2. Start Video Stream
-
-```bash
-curl -X POST http://localhost:8000/api/streams/start \
-  -H "Content-Type: application/json" \
-  -d '{
-    "room_id": "room_101",
-    "camera_url": "0",
-    "enable_gesture_detection": true,
-    "enable_fall_detection": true,
-    "enable_voice_detection": false,
-    "enable_privacy_filter": true
-  }'
-```
-
-### 3. Add a Nurse Contact
-
-```bash
-curl -X POST http://localhost:8000/api/contacts \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Nurse Jane",
-    "role": "nurse",
-    "phone_number": "+1234567890",
-    "priority": 1,
-    "active": true
-  }'
-```
-
-## 📦 Deployment
-
-### Docker Deployment
-
-```bash
-# Coming soon - Docker configurations
-```
-
-### Vercel (Frontend)
-
-```bash
-cd frontend
-npm run build
-vercel deploy
-```
-
-### Render (Backend)
-
-1. Create account at https://render.com
-2. Create new Web Service
-3. Connect repository
-4. Set build command: `pip install -r requirements.txt`
-5. Set start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-6. Add environment variables
-
-## 🔐 Security Considerations
-
-- Use environment variables for sensitive data
-- Enable HTTPS in production
-- Use strong MongoDB passwords
-- Restrict CORS origins
-- Regularly update dependencies
-- Keep Firebase/Twilio keys secure
-- Use authentication for production
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 🆘 Support
-
-For support, please open an issue on GitHub or contact the development team.
-
-## 🙏 Acknowledgments
-
-- MediaPipe for gesture and pose detection
-- Vosk for offline speech recognition
-- OpenCV for video processing
-- FastAPI for the excellent backend framework
-- React and TailwindCSS for the beautiful UI
 
 ---
 
-**Note**: This system is intended for demonstration and development purposes. For production medical use, ensure compliance with relevant healthcare regulations (HIPAA, etc.) and conduct thorough testing.
+## 📡 API Reference
+
+### 🚨 Alerts API (`/api/alerts`)
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/alerts` | Retrieve alerts (filterable by `status`) |
+| `GET` | `/api/alerts/{id}` | Get specific alert by ID |
+| `POST` | `/api/alerts/{id}/acknowledge` | Acknowledge active alert |
+| `POST` | `/api/alerts/{id}/resolve` | Resolve an alert |
+| `GET` | `/api/alerts/{id}/logs` | Retrieve action audit logs |
+
+### 👥 Contacts Management API (`/api/contacts`)
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/contacts` | Get list of all nurse and doctor contacts |
+| `POST` | `/api/contacts` | Add new nurse contact with phone number and priority |
+| `GET` | `/api/contacts/{id}` | Get specific contact details |
+| `PUT` | `/api/contacts/{id}` | Update contact phone number, role, or active status |
+| `DELETE` | `/api/contacts/{id}` | Remove a contact |
+
+### 📹 Video & Monitoring Stream API (`/api/streams`)
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `WS` | `/api/streams/mobile/{id}/ws` | Binary WebSocket video stream with 10s hand-raise detection |
+| `POST` | `/api/streams/mobile/{id}/frame`| HTTP base64 frame ingest with AI evaluation |
+| `GET` | `/api/streams/mobile/{id}/mjpeg`| Live MJPEG preview feed |
+| `WS` | `/ws` | Dashboard real-time alert event notifications |
+
+---
+
+## 🧪 Testing the Distress Alert Workflow
+
+1. Open **Contact Management** (`http://localhost:5173/contacts`) and add an active nurse with a verified phone number.
+2. Open **Screen Monitoring** (`http://localhost:5173/screen-capture`) and click **Start CCTV Monitoring**.
+3. Raise your hand in front of the camera:
+   - Notice the live duration timer counting upward (`1.2s`, `2.5s`, `5.0s`, ...).
+   - If lowered before 10 seconds, the timer safely resets.
+   - When held continuously for **$\ge$ 10.0 seconds**, the status turns red: `DISTRESS DETECTED`.
+   - The alert is recorded in MongoDB Atlas, broadcast to the dashboard, and an automated Twilio voice call dials the nurse.
+4. You can also trigger a test alert via CLI anytime:
+   ```powershell
+   cd backend
+   python trigger_test_alert.py
+   ```
+
+---
+
+## 📄 License
+This project is licensed under the MIT License.

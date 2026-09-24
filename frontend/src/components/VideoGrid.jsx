@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:8000';
+const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+const API_BASE = `http://${host}:8000`;
 
 export function VideoGrid() {
   const [rooms, setRooms] = useState([]);
@@ -18,10 +19,11 @@ export function VideoGrid() {
   const fetchRooms = async () => {
     try {
       const response = await axios.get(`${API_BASE}/api/rooms`);
-      setRooms(response.data);
+      setRooms(response.data || []);
       setLoading(false);
-    } catch (error) {
-      console.error('Error fetching rooms:', error);
+    } catch {
+      // Default to empty array gracefully without error spam
+      setRooms([]);
       setLoading(false);
     }
   };
@@ -76,9 +78,9 @@ export function VideoGrid() {
       <div className="bg-white rounded-lg shadow p-6">
         <h2 className="text-2xl font-bold mb-4">Video Feeds</h2>
         <div className="text-center py-8">
-          <p className="text-gray-600 mb-4">No rooms configured yet.</p>
-          <a href="/rooms" className="text-blue-600 hover:underline">
-            Add a room to get started
+          <p className="text-gray-600 mb-4">Ward monitor CCTV feed is active via Screen Capture.</p>
+          <a href="/screen-capture" className="text-blue-600 hover:underline font-semibold">
+            Open Ward CCTV Monitor →
           </a>
         </div>
       </div>

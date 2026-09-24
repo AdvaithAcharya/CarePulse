@@ -1,5 +1,5 @@
 """
-Configuration settings for GuardianAI backend
+Configuration settings for CarePulse backend
 """
 from pydantic_settings import BaseSettings
 from typing import List
@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     """Application settings"""
     
     # Application
-    APP_NAME: str = "GuardianAI"
+    APP_NAME: str = "CarePulse"
     DEBUG: bool = True
     HOST: str = "0.0.0.0"
     PORT: int = 8000
@@ -19,9 +19,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["*"]  # Allow all origins (update for production)
     
     # MongoDB
-    MONGODB_URL: str = "mongodb://localhost:27017"  # Will be overridden by MONGO_URI if present
-    MONGO_URI: str = ""  # Alternative MongoDB connection string
-    MONGODB_DB_NAME: str = "guardianai"
+    MONGODB_URL: str = "mongodb+srv://advaith23cs005_db_user:advaith2316@cluster1.1tuvby8.mongodb.net/?appName=Cluster1"
+    MONGO_URI: str = "mongodb+srv://advaith23cs005_db_user:advaith2316@cluster1.1tuvby8.mongodb.net/?appName=Cluster1"
+    MONGODB_DB_NAME: str = "carepulse"
     
     # Firebase
     FIREBASE_CREDENTIALS_PATH: str = ""
@@ -44,7 +44,8 @@ class Settings(BaseSettings):
     
     # Video Processing
     MAX_CONCURRENT_STREAMS: int = 10
-    FRAME_SKIP: int = 2  # Process every Nth frame
+    FRAME_SKIP: int = 2  # Default frame skip
+    AI_FRAME_SKIP: int = 6  # AI decimation (process every 6th frame ~5 FPS)
     VIDEO_QUALITY: int = 50  # JPEG quality for streaming (0-100)
     
     # Privacy

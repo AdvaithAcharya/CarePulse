@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { exportSystemHealthReport } from '../utils/exportUtils';
+import { PageLayout, GlassCard } from './SharedLayout';
+import { LiquidMetalBorder, LiquidMetalButton } from './ui/LiquidMetal';
 
 export const SystemHealth = () => {
   const [health, setHealth] = useState({
@@ -31,7 +33,7 @@ export const SystemHealth = () => {
     
     try {
       // Check API health
-      const response = await fetch('http://localhost:8000/api/health');
+      const response = await fetch('http://localhost:8000/health');
       const apiResponseTime = Date.now() - startTime;
       
       if (response.ok) {
@@ -75,21 +77,21 @@ export const SystemHealth = () => {
     switch (status) {
       case 'healthy':
       case 'connected':
-        return 'text-green-600 bg-green-100';
+        return 'text-white bg-white/10';
       case 'degraded':
-        return 'text-yellow-600 bg-yellow-100';
+        return 'text-white/70 bg-white/5';
       case 'down':
       case 'disconnected':
-        return 'text-red-600 bg-red-100';
+        return 'text-white/50 bg-white/5';
       default:
-        return 'text-gray-600 bg-gray-100';
+        return 'text-white/30 bg-white/5';
     }
   };
 
   const getStatusIndicator = (isHealthy) => {
     return isHealthy
-      ? '🟢'
-      : '🔴';
+      ? '○'
+      : '●';
   };
 
   const handleExport = () => {
@@ -97,42 +99,32 @@ export const SystemHealth = () => {
   };
 
   return (
-    <div className="space-y-6 dark:text-gray-100">
+    <PageLayout 
+      title="System Health" 
+      subtitle="Monitor system performance and status"
+    >
+      <div className="space-y-6">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
-        className="flex justify-between items-center"
+        className="flex justify-end items-center"
       >
-        <div>
-          <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent">
-            🏥 System Health
-          </h2>
-          <p className="text-neutral-600 dark:text-neutral-400">Monitor system performance and status</p>
-        </div>
-        <div className="flex space-x-2">
-          <motion.button
+        <div className="flex space-x-3">
+          <LiquidMetalButton
             onClick={handleExport}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="relative overflow-hidden bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-2 rounded-lg font-semibold shadow-md hover:shadow-xl transition-all duration-300 group"
+            size="sm"
+            borderWidth={3}
           >
-            <span className="relative z-10 flex items-center gap-2">
-              📄 Export Report
-            </span>
-            <div className="absolute inset-0 bg-gradient-to-r from-emerald-600 to-green-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-          </motion.button>
-          <motion.button
+            Export Report
+          </LiquidMetalButton>
+          <LiquidMetalButton
             onClick={fetchSystemHealth}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="relative overflow-hidden bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-4 py-2 rounded-lg font-semibold shadow-md hover:shadow-xl transition-all duration-300 group"
+            size="sm"
+            borderWidth={3}
           >
-            <span className="relative z-10 flex items-center gap-2">
-              🔄 Refresh
-            </span>
-            <div className="absolute inset-0 bg-gradient-to-r from-cyan-600 to-blue-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-          </motion.button>
+            Refresh
+          </LiquidMetalButton>
         </div>
       </motion.div>
 
@@ -144,88 +136,103 @@ export const SystemHealth = () => {
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
       >
         {/* API Status */}
-        <motion.div 
-          whileHover={{ y: -5, scale: 1.02 }}
-          className="relative p-6 rounded-2xl bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-2 border-green-200 dark:border-green-700 overflow-hidden shadow-lg"
+        <LiquidMetalBorder 
+          borderWidth={3}
+          borderRadius="rounded-2xl"
+          innerClassName="p-6 bg-neutral-950/85"
+          className="hover:-translate-y-1 transition-transform"
         >
-          <div className="absolute top-0 right-0 w-20 h-20 bg-green-400/20 rounded-full blur-2xl"></div>
           <div className="flex items-center justify-between mb-2 relative z-10">
-            <h3 className="text-sm font-semibold text-green-700 dark:text-green-300">API Status</h3>
-            <span className="text-3xl">{getStatusIndicator(health.apiStatus === 'healthy')}</span>
+            <h3 className="text-sm font-semibold text-white/50">API Status</h3>
+            <span className="text-3xl text-white/70">{getStatusIndicator(health.apiStatus === 'healthy')}</span>
           </div>
-          <p className="text-2xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent relative z-10">
+          <p className="text-2xl font-bold text-white relative z-10">
             {health.apiStatus.toUpperCase()}
           </p>
-          <p className="text-sm text-green-700 dark:text-green-400 mt-1 relative z-10">
+          <p className="text-sm text-white/50 mt-1 relative z-10">
             Response: {health.apiResponseTime}ms
           </p>
-        </motion.div>
+        </LiquidMetalBorder>
 
         {/* Database */}
-        <motion.div 
-          whileHover={{ y: -5, scale: 1.02 }}
-          className="relative p-6 rounded-2xl bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-2 border-blue-200 dark:border-blue-700 overflow-hidden shadow-lg"
+        <LiquidMetalBorder 
+          borderWidth={3}
+          borderRadius="rounded-2xl"
+          innerClassName="p-6 bg-neutral-950/85"
+          className="hover:-translate-y-1 transition-transform"
         >
-          <div className="absolute top-0 right-0 w-20 h-20 bg-blue-400/20 rounded-full blur-2xl"></div>
           <div className="flex items-center justify-between mb-2 relative z-10">
-            <h3 className="text-sm font-semibold text-blue-700 dark:text-blue-300">Database</h3>
-            <span className="text-3xl">{getStatusIndicator(health.databaseConnected)}</span>
+            <h3 className="text-sm font-semibold text-white/50">Database</h3>
+            <span className="text-3xl text-white/70">{getStatusIndicator(health.databaseConnected)}</span>
           </div>
-          <p className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent relative z-10">
+          <p className="text-2xl font-bold text-white relative z-10">
             {health.databaseConnected ? 'CONNECTED' : 'DISCONNECTED'}
           </p>
-        </motion.div>
+        </LiquidMetalBorder>
 
         {/* Active Streams */}
-        <motion.div 
-          whileHover={{ y: -5, scale: 1.02 }}
-          className="relative p-6 rounded-2xl bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border-2 border-purple-200 dark:border-purple-700 overflow-hidden shadow-lg"
+        <LiquidMetalBorder 
+          borderWidth={3}
+          borderRadius="rounded-2xl"
+          innerClassName="p-6 bg-neutral-950/85"
+          className="hover:-translate-y-1 transition-transform"
         >
-          <div className="absolute top-0 right-0 w-20 h-20 bg-purple-400/20 rounded-full blur-2xl"></div>
           <div className="flex items-center justify-between mb-2 relative z-10">
-            <h3 className="text-sm font-semibold text-purple-700 dark:text-purple-300">Video Streams</h3>
-            <span className="text-3xl">📹</span>
+            <h3 className="text-sm font-semibold text-white/50">Video Streams</h3>
           </div>
-          <p className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent relative z-10">{health.activeStreams}</p>
-          <p className="text-sm text-purple-700 dark:text-purple-400 relative z-10">Active streams</p>
-        </motion.div>
+          <p className="text-3xl font-bold text-white relative z-10">{health.activeStreams}</p>
+          <p className="text-sm text-white/50 relative z-10">Active streams</p>
+        </LiquidMetalBorder>
 
         {/* Alerts */}
-        <motion.div 
-          whileHover={{ y: -5, scale: 1.02 }}
-          className="relative p-6 rounded-2xl bg-gradient-to-br from-red-50 to-pink-50 dark:from-red-900/20 dark:to-pink-900/20 border-2 border-red-200 dark:border-red-700 overflow-hidden shadow-lg"
+        <LiquidMetalBorder 
+          borderWidth={3}
+          borderRadius="rounded-2xl"
+          innerClassName="p-6 bg-neutral-950/85"
+          className="hover:-translate-y-1 transition-transform"
         >
-          <div className="absolute top-0 right-0 w-20 h-20 bg-red-400/20 rounded-full blur-2xl"></div>
           <div className="flex items-center justify-between mb-2 relative z-10">
-            <h3 className="text-sm font-semibold text-red-700 dark:text-red-300">Alerts</h3>
-            <span className="text-3xl">🚨</span>
+            <h3 className="text-sm font-semibold text-white/50">Alerts</h3>
           </div>
-          <p className="text-3xl font-bold bg-gradient-to-r from-red-600 to-pink-600 bg-clip-text text-transparent relative z-10">{health.activeAlerts}</p>
-          <p className="text-sm text-red-700 dark:text-red-400 relative z-10">
+          <p className="text-3xl font-bold text-white relative z-10">{health.activeAlerts}</p>
+          <p className="text-sm text-white/50 relative z-10">
             of {health.totalAlerts} total
           </p>
-        </motion.div>
+        </LiquidMetalBorder>
       </motion.div>
 
       {/* Detailed Metrics */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-        <h3 className="text-lg font-bold mb-4 dark:text-white">System Metrics</h3>
+      <GlassCard className="p-8 relative overflow-hidden mt-6">
+        {/* inner glow */}
+        <div className="pointer-events-none absolute -top-24 left-1/2 h-[240px] w-[240px] -translate-x-1/2 rounded-full bg-white/[0.06] blur-[90px]" />
+        
+        <div className="relative z-10">
+          <div className="mb-10 flex items-start justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-white/40">
+                Performance
+              </p>
+              <h2 className="mt-3 text-4xl font-black tracking-[-0.05em]">
+                System Metrics
+              </h2>
+            </div>
+          </div>
         
         <div className="space-y-4">
           {/* API Response Time */}
           <div>
-            <div className="flex justify-between mb-1">
-              <span className="text-sm font-medium dark:text-gray-300">API Response Time</span>
-              <span className="text-sm font-medium dark:text-gray-300">{health.apiResponseTime}ms</span>
+            <div className="flex justify-between mb-2">
+              <span className="text-sm font-medium text-white/70">API Response Time</span>
+              <span className="text-sm font-medium text-white/70">{health.apiResponseTime}ms</span>
             </div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div className="w-full bg-white/10 rounded-full h-1.5">
               <div
-                className={`h-2 rounded-full ${
+                className={`h-1.5 rounded-full ${
                   health.apiResponseTime < 100
-                    ? 'bg-green-600'
+                    ? 'bg-white'
                     : health.apiResponseTime < 300
-                    ? 'bg-yellow-600'
-                    : 'bg-red-600'
+                    ? 'bg-white/60'
+                    : 'bg-white/30'
                 }`}
                 style={{ width: `${Math.min((health.apiResponseTime / 500) * 100, 100)}%` }}
               ></div>
@@ -233,15 +240,15 @@ export const SystemHealth = () => {
           </div>
 
           {/* Memory (Simulated) */}
-          <div>
-            <div className="flex justify-between mb-1">
-              <span className="text-sm font-medium dark:text-gray-300">Memory Usage</span>
-              <span className="text-sm font-medium dark:text-gray-300">{metrics.memory}%</span>
+          <div className="mt-6">
+            <div className="flex justify-between mb-2">
+              <span className="text-sm font-medium text-white/70">Memory Usage</span>
+              <span className="text-sm font-medium text-white/70">{metrics.memory}%</span>
             </div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div className="w-full bg-white/10 rounded-full h-1.5">
               <div
-                className={`h-2 rounded-full ${
-                  metrics.memory < 70 ? 'bg-green-600' : metrics.memory < 85 ? 'bg-yellow-600' : 'bg-red-600'
+                className={`h-1.5 rounded-full ${
+                  metrics.memory < 70 ? 'bg-white' : metrics.memory < 85 ? 'bg-white/60' : 'bg-white/30'
                 }`}
                 style={{ width: `${metrics.memory}%` }}
               ></div>
@@ -249,18 +256,20 @@ export const SystemHealth = () => {
           </div>
 
           {/* Uptime */}
-          <div>
+          <div className="mt-6">
             <div className="flex justify-between">
-              <span className="text-sm font-medium dark:text-gray-300">Last Updated</span>
-              <span className="text-sm text-gray-600 dark:text-gray-400">
+              <span className="text-sm font-medium text-white/70">Last Updated</span>
+              <span className="text-sm text-white/50">
                 {health.lastUpdated.toLocaleTimeString()}
               </span>
             </div>
           </div>
+          </div>
         </div>
-      </div>
+      </GlassCard>
 
-    </div>
+      </div>
+    </PageLayout>
   );
 };
 

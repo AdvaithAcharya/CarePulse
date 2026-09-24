@@ -66,15 +66,11 @@ export const useKeyboardShortcuts = (handlers = {}) => {
             break;
           case '4':
             e.preventDefault();
-            handlers.navigateTo?.('/rooms');
+            handlers.navigateTo?.('/screen-capture');
             break;
           case '5':
             e.preventDefault();
-            handlers.navigateTo?.('/patients');
-            break;
-          case '6':
-            e.preventDefault();
-            handlers.navigateTo?.('/analytics');
+            handlers.navigateTo?.('/system');
             break;
           case '?':
             e.preventDefault();
@@ -95,10 +91,6 @@ export const useKeyboardShortcuts = (handlers = {}) => {
           case 'e':
             e.preventDefault();
             handlers.exportData?.();
-            break;
-          case 's':
-            e.preventDefault();
-            handlers.openSettings?.();
             break;
           default:
             break;

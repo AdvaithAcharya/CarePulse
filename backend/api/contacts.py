@@ -13,11 +13,21 @@ import re
 
 router = APIRouter()
 
-_E164 = re.compile(r"^\+[1-9]\d{7,14}$")
+def _format_phone(raw: str) -> str:
+    if not raw:
+        return ""
+    # Strip spaces, dashes, parentheses
+    cleaned = re.sub(r"[^\d+]", "", str(raw).strip())
+    if not cleaned.startswith("+"):
+        cleaned = "+91" + cleaned if len(cleaned) == 10 else "+" + cleaned
+    return cleaned
 
-def _assert_e164(raw: str):
-    if not raw or not _E164.match(str(raw)):
-        raise HTTPException(status_code=422, detail="phone_number must be E.164 format (e.g., +15551234567) and verified in Twilio for trial accounts")
+
+def _to_obj_id(cid: str):
+    try:
+        return ObjectId(cid)
+    except Exception:
+        return cid
 
 
 @router.get("/")
@@ -25,20 +35,32 @@ async def get_contacts(active_only: bool = False):
     """Get all contacts"""
     try:
         collection = database.get_collection("contacts")
-        query = {"active": True} if active_only else {}
-        cursor = collection.find(query).sort("priority", 1)
+        cursor = collection.find({}).sort("priority", 1)
         contacts = []
         
         async for doc in cursor:
+            active_val = doc.get("active")
+            is_active = True if active_val is None else (
+                active_val.lower() in ("true", "1", "yes") if isinstance(active_val, str) else bool(active_val)
+            )
+            
+            if active_only and not is_active:
+                continue
+
+            cid = str(doc.get("_id", ""))
+            name = doc.get("name") or doc.get("contact_name") or doc.get("full_name") or doc.get("username") or doc.get("phone") or "Unnamed Contact"
+            role = str(doc.get("role") or "nurse").lower()
+            phone_number = doc.get("phone_number") or doc.get("phone") or doc.get("mobile") or doc.get("phone_no") or ""
+
             contact_dict = {
-                "id": str(doc["_id"]),
-                "name": doc.get("name", ""),
-                "role": doc.get("role", ""),
-                "phone_number": doc.get("phone_number", ""),
-                "firebase_token": doc.get("firebase_token"),
-                "email": doc.get("email"),
+                "id": cid,
+                "name": name,
+                "role": role,
+                "phone_number": phone_number,
+                "firebase_token": doc.get("firebase_token", ""),
+                "email": doc.get("email", ""),
                 "priority": doc.get("priority", 1),
-                "active": doc.get("active", True),
+                "active": is_active,
                 "created_at": doc.get("created_at")
             }
             contacts.append(contact_dict)
@@ -53,20 +75,29 @@ async def get_contact(contact_id: str):
     """Get a specific contact"""
     try:
         collection = database.get_collection("contacts")
-        doc = await collection.find_one({"_id": ObjectId(contact_id)})
+        query_id = _to_obj_id(contact_id)
+        doc = await collection.find_one({"$or": [{"_id": query_id}, {"_id": contact_id}]})
         
         if not doc:
             raise HTTPException(status_code=404, detail="Contact not found")
         
+        name = doc.get("name") or doc.get("contact_name") or doc.get("full_name") or doc.get("username") or "Unnamed Contact"
+        role = str(doc.get("role") or "nurse").lower()
+        phone_number = doc.get("phone_number") or doc.get("phone") or doc.get("mobile") or doc.get("phone_no") or ""
+        active_val = doc.get("active")
+        is_active = True if active_val is None else (
+            active_val.lower() in ("true", "1", "yes") if isinstance(active_val, str) else bool(active_val)
+        )
+
         return {
-            "id": str(doc["_id"]),
-            "name": doc.get("name", ""),
-            "role": doc.get("role", ""),
-            "phone_number": doc.get("phone_number", ""),
-            "firebase_token": doc.get("firebase_token"),
-            "email": doc.get("email"),
+            "id": str(doc.get("_id", "")),
+            "name": name,
+            "role": role,
+            "phone_number": phone_number,
+            "firebase_token": doc.get("firebase_token", ""),
+            "email": doc.get("email", ""),
             "priority": doc.get("priority", 1),
-            "active": doc.get("active", True),
+            "active": is_active,
             "created_at": doc.get("created_at")
         }
     except HTTPException:
@@ -81,11 +112,11 @@ async def create_contact(contact: Contact):
     try:
         from datetime import datetime
         collection = database.get_collection("contacts")
-        _assert_e164(contact.phone_number)
+        formatted_phone = _format_phone(contact.phone_number)
         contact_dict = {
             "name": contact.name,
-            "role": contact.role,
-            "phone_number": contact.phone_number,
+            "role": (contact.role or "staff").lower(),
+            "phone_number": formatted_phone,
             "firebase_token": contact.firebase_token,
             "email": contact.email,
             "priority": contact.priority,
@@ -97,8 +128,8 @@ async def create_contact(contact: Contact):
         return {
             "id": str(result.inserted_id),
             "name": contact.name,
-            "role": contact.role,
-            "phone_number": contact.phone_number,
+            "role": (contact.role or "staff").lower(),
+            "phone_number": formatted_phone,
             "firebase_token": contact.firebase_token,
             "email": contact.email,
             "priority": contact.priority,
@@ -114,11 +145,12 @@ async def update_contact(contact_id: str, contact: Contact):
     """Update a contact"""
     try:
         collection = database.get_collection("contacts")
-        _assert_e164(contact.phone_number)
+        query_id = _to_obj_id(contact_id)
+        formatted_phone = _format_phone(contact.phone_number)
         contact_dict = {
             "name": contact.name,
-            "role": contact.role,
-            "phone_number": contact.phone_number,
+            "role": (contact.role or "staff").lower(),
+            "phone_number": formatted_phone,
             "firebase_token": contact.firebase_token,
             "email": contact.email,
             "priority": contact.priority,
@@ -126,7 +158,7 @@ async def update_contact(contact_id: str, contact: Contact):
         }
         
         result = await collection.update_one(
-            {"_id": ObjectId(contact_id)},
+            {"$or": [{"_id": query_id}, {"_id": contact_id}]},
             {"$set": contact_dict}
         )
         
@@ -136,8 +168,8 @@ async def update_contact(contact_id: str, contact: Contact):
         return {
             "id": contact_id,
             "name": contact.name,
-            "role": contact.role,
-            "phone_number": contact.phone_number,
+            "role": (contact.role or "staff").lower(),
+            "phone_number": formatted_phone,
             "firebase_token": contact.firebase_token,
             "email": contact.email,
             "priority": contact.priority,
@@ -155,7 +187,8 @@ async def delete_contact(contact_id: str):
     """Delete a contact"""
     try:
         collection = database.get_collection("contacts")
-        result = await collection.delete_one({"_id": ObjectId(contact_id)})
+        query_id = _to_obj_id(contact_id)
+        result = await collection.delete_one({"$or": [{"_id": query_id}, {"_id": contact_id}]})
         
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Contact not found")

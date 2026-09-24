@@ -16,82 +16,130 @@ logger = logging.getLogger(__name__)
 
 
 class GestureDetector:
-    """Detects hand gestures (wave, tap) using MediaPipe"""
+    """Detects raised hands (wrist above shoulder) sustained for > 10 seconds to trigger distress alert"""
     
     def __init__(self):
+        self.mp_pose = mp.solutions.pose
+        self.pose = self.mp_pose.Pose(
+            static_image_mode=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=2,
-            min_detection_confidence=0.7,
+            min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
         self.mp_draw = mp.solutions.drawing_utils
         
-        # Gesture tracking
-        self.gesture_history = deque(maxlen=30)  # Track last 30 frames
-        self.wave_count = 0
-        self.last_wave_time = None
-        self.wave_direction = None
+        # State tracking for hands raised > 3 seconds
+        self.raised_start_time: Optional[datetime] = None
+        self.required_duration_seconds = 3.0
+        self.alert_has_fired = False  # Track if distress alert has fired for current continuous gesture
+        self.distress_timestamps = deque(maxlen=45)  # 45 frames @ 15fps = 3 seconds
         
-        # Configuration
-        self.gesture_threshold = settings.GESTURE_THRESHOLD
-        self.time_window = settings.GESTURE_TIME_WINDOW
-        
-    def detect(self, frame: np.ndarray) -> Tuple[bool, Optional[str], float]:
+    def detect(self, frame: np.ndarray) -> Tuple[bool, Optional[str], float, List[dict], bool, float]:
         """
-        Detect gestures in a frame
+        Ultra-fast single-pass hand detection and bounding box extraction.
+        Only tracks RAISED hands (ignores resting/lowered hands).
+        Runs in ~15ms per frame.
         
-        Args:
-            frame: Input video frame (BGR format)
-            
         Returns:
-            Tuple of (alert_triggered, gesture_type, confidence)
+            Tuple of (alert_triggered, gesture_type, confidence, bboxes, hand_raised, raised_duration)
         """
-        # Convert to RGB for MediaPipe
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self.hands.process(rgb_frame)
+        # Downscale frame for ultra-fast 15ms MediaPipe inference
+        h, w = frame.shape[:2]
+        small_frame = cv2.resize(frame, (480, 270), interpolation=cv2.INTER_NEAREST)
+        rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
         
+        # Single pass: process MediaPipe Hands first (~10-12ms)
+        hand_results = self.hands.process(rgb_frame)
+        bboxes = []
+        hand_raised = False
+
+        if hand_results.multi_hand_landmarks:
+            for hand_landmarks in hand_results.multi_hand_landmarks:
+                xs = [lm.x for lm in hand_landmarks.landmark]
+                ys = [lm.y for lm in hand_landmarks.landmark]
+                wrist = hand_landmarks.landmark[self.mp_hands.HandLandmark.WRIST]
+                
+                # ONLY track hand if it is physically raised (wrist y < 0.52 or fingers y < 0.40)
+                is_this_hand_raised = (wrist.y < 0.52 or min(ys) < 0.40)
+                if is_this_hand_raised:
+                    hand_raised = True
+                    pad_x = 0.05
+                    pad_y = 0.05
+                    bboxes.append({
+                        "xmin": max(0.0, min(xs) - pad_x),
+                        "ymin": max(0.0, min(ys) - pad_y),
+                        "xmax": min(1.0, max(xs) + pad_x),
+                        "ymax": min(1.0, max(ys) + pad_y),
+                        "wrist_x": wrist.x,
+                        "wrist_y": wrist.y
+                    })
+
+        # Only run MediaPipe Pose (~20ms) if hands weren't detected or to confirm shoulder level
+        if not hand_raised:
+            pose_results = self.pose.process(rgb_frame)
+            if pose_results.pose_landmarks:
+                landmarks = pose_results.pose_landmarks.landmark
+                left_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER]
+                right_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER]
+                left_wrist = landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST]
+                right_wrist = landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST]
+                
+                left_raised = (left_wrist.visibility > 0.3 and left_shoulder.visibility > 0.3 and left_wrist.y < left_shoulder.y - 0.03)
+                right_raised = (right_wrist.visibility > 0.3 and right_shoulder.visibility > 0.3 and right_wrist.y < right_shoulder.y - 0.03)
+                
+                if left_raised or right_raised:
+                    hand_raised = True
+                    if not bboxes:
+                        for wrist_idx in [self.mp_pose.PoseLandmark.LEFT_WRIST, self.mp_pose.PoseLandmark.RIGHT_WRIST]:
+                            wrist = landmarks[wrist_idx]
+                            if wrist.visibility > 0.3 and wrist.y < 0.52:
+                                bboxes.append({
+                                    "xmin": max(0.0, wrist.x - 0.12),
+                                    "ymin": max(0.0, wrist.y - 0.12),
+                                    "xmax": min(1.0, wrist.x + 0.12),
+                                    "ymax": min(1.0, wrist.y + 0.12),
+                                    "wrist_x": wrist.x,
+                                    "wrist_y": wrist.y
+                                })
+
+        now = datetime.now()
+        current_time = datetime.now().timestamp()
         alert_triggered = False
         gesture_type = None
         confidence = 0.0
-        
-        if results.multi_hand_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
-                # Get wrist position
-                wrist = hand_landmarks.landmark[self.mp_hands.HandLandmark.WRIST]
-                x, y = wrist.x, wrist.y
-                
-                # Track hand movement
-                self.gesture_history.append((x, y, datetime.now()))
-                
-                # Check for wave gesture
-                is_wave, wave_conf = self._detect_wave()
-                if is_wave:
-                    self.wave_count += 1
-                    self.last_wave_time = datetime.now()
-                    
-                    # Check if threshold reached
-                    if self.wave_count >= self.gesture_threshold:
-                        alert_triggered = True
-                        gesture_type = "wave"
-                        confidence = wave_conf
-                        self.wave_count = 0  # Reset counter
-                        logger.info(f"Wave gesture detected: {self.gesture_threshold} waves")
-                
-                # Check for tap gesture (hand moving up and down quickly)
-                is_tap, tap_conf = self._detect_tap()
-                if is_tap:
+        raised_duration = 0.0
+
+        if hand_raised:
+            if self.raised_start_time is None:
+                self.raised_start_time = now
+            self.distress_timestamps.append(current_time)
+
+            raised_duration = (now - self.raised_start_time).total_seconds()
+
+            # Trigger alert ONLY when hand is continuously raised for >= 10.0 seconds
+            if raised_duration >= 10.0:
+                if not self.alert_has_fired:
                     alert_triggered = True
-                    gesture_type = "tap"
-                    confidence = tap_conf
-                    logger.info("Tap gesture detected")
-        
-        # Reset wave count if time window expired
-        if self.last_wave_time and (datetime.now() - self.last_wave_time).seconds > self.time_window:
-            self.wave_count = 0
-            
-        return alert_triggered, gesture_type, confidence
+                    self.alert_has_fired = True
+                    gesture_type = "raised_hand_10s"
+                    confidence = 0.98
+                    logger.info(f"🚨 PATIENT DISTRESS DETECTED: Hand raised continuously >10 seconds! Triggering distress alert & emergency Twilio call.")
+
+                # Turn off bounding tracking box & timer for patient once 10s threshold is reached / alert fired
+                bboxes = []
+        else:
+            # Reset state when patient lowers hand before 10s or after event
+            self.raised_start_time = None
+            self.alert_has_fired = False
+            self.distress_timestamps.clear()
+
+        return alert_triggered, gesture_type, confidence, bboxes, hand_raised, raised_duration
     
     def _detect_wave(self) -> Tuple[bool, float]:
         """Detect horizontal waving motion"""

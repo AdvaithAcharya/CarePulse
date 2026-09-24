@@ -4,22 +4,22 @@ services:
   # MongoDB Database
   mongodb:
     image: mongo:7.0
-    container_name: guardianai-mongodb
+    container_name: carepulse-mongodb
     ports:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
     environment:
-      - MONGO_INITDB_DATABASE=guardianai
+      - MONGO_INITDB_DATABASE=carepulse
     networks:
-      - guardianai-network
+      - carepulse-network
 
   # Backend API
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: guardianai-backend
+    container_name: carepulse-backend
     ports:
       - "8000:8000"
     volumes:
@@ -27,12 +27,12 @@ services:
       - ./backend/models:/app/models
     environment:
       - MONGODB_URL=mongodb://mongodb:27017
-      - MONGODB_DB_NAME=guardianai
+      - MONGODB_DB_NAME=carepulse
       - DEBUG=True
     depends_on:
       - mongodb
     networks:
-      - guardianai-network
+      - carepulse-network
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
   # Frontend Dashboard
@@ -40,7 +40,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: guardianai-frontend
+    container_name: carepulse-frontend
     ports:
       - "5173:5173"
     volumes:
@@ -52,12 +52,12 @@ services:
     depends_on:
       - backend
     networks:
-      - guardianai-network
+      - carepulse-network
     command: npm run dev
 
 volumes:
   mongodb_data:
 
 networks:
-  guardianai-network:
+  carepulse-network:
     driver: bridge

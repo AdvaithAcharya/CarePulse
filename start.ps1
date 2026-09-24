@@ -1,7 +1,7 @@
-# GuardianAI Quick Start Script (PowerShell)
+# CarePulse Quick Start Script (PowerShell)
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "    GuardianAI Quick Start Script" -ForegroundColor Cyan
+Write-Host "    CarePulse Quick Start Script" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -41,7 +41,7 @@ try {
 }
 
 Write-Host ""
-Write-Host "Starting GuardianAI..." -ForegroundColor Cyan
+Write-Host "Starting CarePulse..." -ForegroundColor Cyan
 Write-Host ""
 
 # Start Backend
@@ -56,7 +56,7 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd frontend; npm 
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "   GuardianAI is starting!" -ForegroundColor Green
+Write-Host "   CarePulse is starting!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Backend API: http://localhost:8000" -ForegroundColor Cyan

@@ -33,6 +33,7 @@ async def get_alerts(
         async for doc in cursor:
             alert_dict = {
                 "id": str(doc["_id"]),
+                "_id": str(doc["_id"]),
                 "alert_type": doc.get("alert_type"),
                 "room_id": doc.get("room_id"),
                 "patient_id": doc.get("patient_id"),
@@ -150,5 +151,81 @@ async def get_alert_logs(alert_id: str):
         
         return logs
     
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _to_obj_id(cid: str):
+    try:
+        from bson import ObjectId
+        return ObjectId(cid)
+    except Exception:
+        return cid
+
+
+@router.delete("/clear")
+@router.delete("/all")
+async def clear_all_alerts(request: Request):
+    """Delete all alerts and alert logs from database and active memory"""
+    try:
+        alerts_col = database.get_collection("alerts")
+        logs_col = database.get_collection("alert_logs")
+        
+        res1 = await alerts_col.delete_many({})
+        res2 = await logs_col.delete_many({})
+        
+        if hasattr(request.app.state, "alert_manager"):
+            mgr = request.app.state.alert_manager
+            mgr.active_alerts.clear()
+            for t in list(mgr.alert_tasks.values()):
+                t.cancel()
+            mgr.alert_tasks.clear()
+
+        if hasattr(request.app.state, "ws_manager"):
+            await request.app.state.ws_manager.broadcast({
+                "type": "alerts_cleared"
+            })
+
+        return {
+            "success": True,
+            "message": "All alert logs deleted successfully",
+            "deleted_alerts": res1.deleted_count,
+            "deleted_logs": res2.deleted_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{alert_id}")
+async def delete_alert(alert_id: str, request: Request):
+    """Delete an individual alert log"""
+    try:
+        query_id = _to_obj_id(alert_id)
+        alerts_col = database.get_collection("alerts")
+        logs_col = database.get_collection("alert_logs")
+        
+        res1 = await alerts_col.delete_one({"$or": [{"_id": query_id}, {"_id": alert_id}]})
+        await logs_col.delete_many({"alert_id": alert_id})
+        
+        if hasattr(request.app.state, "alert_manager"):
+            mgr = request.app.state.alert_manager
+            if alert_id in mgr.active_alerts:
+                del mgr.active_alerts[alert_id]
+            if alert_id in mgr.alert_tasks:
+                mgr.alert_tasks[alert_id].cancel()
+                del mgr.alert_tasks[alert_id]
+
+        if hasattr(request.app.state, "ws_manager"):
+            await request.app.state.ws_manager.broadcast({
+                "type": "alert_deleted",
+                "alert_id": alert_id
+            })
+
+        if res1.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Alert not found")
+
+        return {"success": True, "message": "Alert log deleted successfully", "alert_id": alert_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,5 +1,5 @@
 """
-GuardianAI - Main FastAPI Application
+CarePulse - Main FastAPI Application
 Privacy-First Patient Distress Detection System
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, BackgroundTasks
@@ -19,10 +19,10 @@ load_dotenv()
 
 from config import settings
 from database import database
-from models import Alert, Patient, Room, Contact, AlertLog
+from models import Alert, Contact, AlertLog
 from video_processor import VideoStreamManager
 from alert_manager import AlertManager
-from api import alerts, patients, rooms, contacts, streams
+from api import alerts, contacts, streams
 from pydantic import BaseModel
 try:
     from twilio.rest import Client as TwilioClient
@@ -33,6 +33,18 @@ except Exception:
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Filter out repetitive frame POST requests & polling GET requests from uvicorn access logs
+class EndpointFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if "POST /api/streams/mobile/" in message and "/frame" in message:
+            return False
+        if "GET /api/alerts" in message:
+            return False
+        return True
+
+logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 # Global managers
 video_manager = VideoStreamManager()
@@ -78,7 +90,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="GuardianAI API",
+    title="CarePulse API",
     description="Low-Cost, Privacy-First Patient Distress Detection System",
     version="1.0.0",
     lifespan=lifespan
@@ -95,8 +107,6 @@ app.add_middleware(
 
 # Include routers
 app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
-app.include_router(patients.router, prefix="/api/patients", tags=["patients"])
-app.include_router(rooms.router, prefix="/api/rooms", tags=["rooms"])
 app.include_router(contacts.router, prefix="/api/contacts", tags=["contacts"])
 app.include_router(streams.router, prefix="/api/streams", tags=["streams"])
 
@@ -131,7 +141,7 @@ manager = ConnectionManager()
 async def root():
     """Health check endpoint"""
     return {
-        "service": "GuardianAI",
+        "service": "CarePulse",
         "status": "operational",
         "version": "1.0.0"
     }
@@ -151,7 +161,7 @@ async def health_check():
 @app.get("/status")
 async def status():
     """Simple status endpoint (production-ready liveness)"""
-    return {"ok": True, "service": "guardian_ai_backend"}
+    return {"ok": True, "service": "care_pulse_backend"}
 
 
 @app.websocket("/ws")
@@ -203,7 +213,7 @@ async def trigger_twilio_call(patient_id: str):
         twiml = (
             f"<Response>"
             f"<Say voice=\"alice\" loop=\"0\">"
-            f"GuardianAI critical alert for patient {patient_id}. Please check immediately."
+            f"CarePulse critical alert for patient {patient_id}. Please check immediately."
             f"</Say>"
             f"</Response>"
         )
@@ -234,8 +244,24 @@ async def create_alert_endpoint(payload: AlertPayload, background_tasks: Backgro
             ts = datetime.utcnow()
         description = f"AI detected {alert_type} for patient {payload.patient_id}"
         
-        # Store alert in MongoDB with fields that the frontend expects
         collection = database.get_collection("alerts")
+        
+        # Deduplicate alerts for same patient within 120 seconds
+        from datetime import timedelta
+        two_mins_ago = datetime.utcnow() - timedelta(seconds=120)
+        existing = await collection.find_one({
+            "patient_id": payload.patient_id,
+            "$or": [
+                {"status": "active"},
+                {"acknowledged": False},
+                {"created_at": {"$gte": two_mins_ago}}
+            ]
+        })
+        if existing:
+            logger.info(f"Suppressed duplicate alert for patient {payload.patient_id}")
+            return {"ok": True, "alert_id": str(existing["_id"]), "duplicate": True}
+
+        # Store alert in MongoDB with fields that the frontend expects
         doc = {
             "alert_type": alert_type,
             "room_id": None,

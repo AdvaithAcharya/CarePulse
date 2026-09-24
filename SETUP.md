@@ -1,102 +1,120 @@
-# GuardianAI Setup Guide
+# Care Pulse – Setup & Execution Guide
 
-## Quick Start (Windows PowerShell)
+This document contains step-by-step instructions for installing, configuring, running, and verifying the **Care Pulse Patient Distress Detection System**.
 
-1. **Run the automated setup script:**
-   ```powershell
-   .\start.ps1
-   ```
+---
 
-This will automatically:
-- Check system requirements
-- Install dependencies
-- Start MongoDB
-- Launch backend and frontend services
+## 📋 System Prerequisites
 
-## Manual Setup
+Ensure the following tools are installed on your environment:
+- **Python**: Version 3.8 or higher (Tested on Python 3.12)
+- **Node.js**: Version 16 or higher (Tested on Node.js v20)
+- **PowerShell / Terminal**: Windows PowerShell or standard Bash shell
+- **MongoDB Atlas or local MongoDB**: Connection string specified in `backend/.env`.
+
+---
+
+## ⚡ Quick Start (Automated Script)
+
+To automatically launch both the backend API server and frontend dashboard on Windows:
+
+```powershell
+.\start.ps1
+```
+
+---
+
+## 🛠️ Step-by-Step Manual Setup
 
 ### Step 1: Backend Setup
 
-```powershell
-cd backend
+1. **Navigate to the Backend Directory**:
+   ```powershell
+   cd backend
+   ```
 
-# Create and activate virtual environment
-python -m venv venv
-venv\Scripts\activate
+2. **Create and Activate Python Virtual Environment**:
+   ```powershell
+   python -m venv venv
+   .\venv\Scripts\activate
+   ```
 
-# Install dependencies
-pip install -r requirements.txt
+3. **Install Dependencies**:
+   ```powershell
+   pip install -r requirements.txt
+   ```
 
-# Copy environment file
-copy .env.example .env
+4. **Configure Environment Variables**:
+   Verify or edit `backend/.env`:
+   ```env
+   # Application Configuration
+   APP_NAME=CarePulse
+   DEBUG=True
+   HOST=0.0.0.0
+   PORT=8000
 
-# Edit .env with your settings
-notepad .env
+   # MongoDB Atlas Connection
+   MONGO_URI=mongodb+srv://<username>:<password>@cluster.mongodb.net/?appName=Cluster1
+   MONGODB_DB_NAME=carepulse
 
-# Run backend
-python main.py
-```
+   # Twilio Voice Alerting (For calling nurses upon distress)
+   TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   TWILIO_PHONE_NUMBER=+1234567890
+
+   # Privacy Face Blurring
+   ENABLE_FACE_BLUR=True
+   BLUR_KERNEL_SIZE=51
+   ```
+
+5. **Start the Backend API Server**:
+   ```powershell
+   python main.py
+   ```
+   - **Backend API**: `http://localhost:8000`
+   - **Interactive API Docs (Swagger)**: `http://localhost:8000/docs`
+   - **Health Check**: `http://localhost:8000/health`
+
+---
 
 ### Step 2: Frontend Setup
 
+1. **Navigate to the Frontend Directory**:
+   Open a separate PowerShell window:
+   ```powershell
+   cd frontend
+   ```
+
+2. **Install Node Dependencies**:
+   ```powershell
+   npm install
+   ```
+
+3. **Start the Frontend Development Server**:
+   ```powershell
+   npm run dev
+   ```
+   - **Care Pulse Dashboard**: `http://localhost:5173`
+
+---
+
+## 🧪 Testing System Endpoints & Distress Workflow
+
+### 1. Test Backend API Health
 ```powershell
-cd frontend
-
-# Install dependencies
-npm install
-
-# Copy environment file
-copy .env.example .env
-
-# Run frontend
-npm run dev
+curl.exe -s http://localhost:8000/health
+```
+Expected response:
+```json
+{"status":"healthy","database":true,"active_streams":0,"active_alerts":0}
 ```
 
-### Step 3: Access Application
-
-- **Backend API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-- **Frontend Dashboard**: http://localhost:5173
-
-## Optional: Download Vosk Model
-
-For voice detection to work, download the Vosk model:
-
-1. Visit: https://alphacephei.com/vosk/models
-2. Download: `vosk-model-small-en-us-0.15`
-3. Extract to: `backend/models/vosk-model-small-en-us-0.15/`
-
-## Docker Setup (Alternative)
-
+### 2. Add an On-Duty Nurse Contact
 ```powershell
-# Build and start all services
-docker-compose up --build
-
-# Stop services
-docker-compose down
-```
-
-## Testing the System
-
-### 1. Create a Room
-```powershell
-curl -X POST http://localhost:8000/api/rooms `
+curl.exe -X POST http://localhost:8000/api/contacts `
   -H "Content-Type: application/json" `
   -d '{
-    "room_number": "101",
-    "floor": 1,
-    "camera_url": "0",
-    "camera_enabled": true,
-    "privacy_enabled": true
-  }'
-```
-
-### 2. Add a Contact
-```powershell
-curl -X POST http://localhost:8000/api/contacts `
-  -H "Content-Type: application/json" `
-  -d '{
-    "name": "Nurse Jane",
+    "name": "Nurse Sarah",
     "role": "nurse",
     "phone_number": "+1234567890",
     "priority": 1,
@@ -104,85 +122,37 @@ curl -X POST http://localhost:8000/api/contacts `
   }'
 ```
 
-### 3. Start Video Stream
-Use the dashboard at http://localhost:5173
+### 3. Retrieve Registered Contacts
+```powershell
+curl.exe -s http://localhost:8000/api/contacts
+```
 
-## Troubleshooting
-
-### MongoDB Connection Error
-- Ensure MongoDB is installed and running
-- Check `MONGODB_URL` in backend/.env
-- Alternative: Use MongoDB Atlas (cloud)
-
-### Module Import Errors
+### 4. Trigger a Test Distress Alert via CLI
 ```powershell
 cd backend
-pip install --upgrade -r requirements.txt
+python trigger_test_alert.py
 ```
+This directly tests:
+1. Alert record insertion in MongoDB Atlas (`carepulse` database).
+2. Real-time WebSocket event dispatch to all connected dashboard clients.
+3. Automated voice call initiation via Twilio to the top-priority active nurse.
 
-### Frontend Port Already in Use
-```powershell
-# Kill process on port 5173
-netstat -ano | findstr :5173
-taskkill /PID <process_id> /F
-
-# Or change port in vite.config.js
-```
-
-### Backend Port Already in Use
-```powershell
-# Kill process on port 8000
-netstat -ano | findstr :8000
-taskkill /PID <process_id> /F
-```
-
-## Production Deployment
-
-### Environment Variables to Set
-
-**Backend (.env)**:
-- `DEBUG=False`
-- `MONGODB_URL=<production-mongodb-url>`
-- `FIREBASE_CREDENTIALS_PATH=<path-to-firebase-json>`
-- `TWILIO_ACCOUNT_SID=<your-sid>`
-- `TWILIO_AUTH_TOKEN=<your-token>`
-- `TWILIO_PHONE_NUMBER=<your-number>`
-
-**Frontend (.env)**:
-- `VITE_API_BASE_URL=<production-backend-url>`
-- `VITE_WS_URL=<production-websocket-url>`
-
-### Deployment Platforms
-
-**Backend Options:**
-- Render
-- Heroku
-- AWS EC2
-- Google Cloud Run
-- DigitalOcean
-
-**Frontend Options:**
-- Vercel
-- Netlify
-- AWS S3 + CloudFront
-- Firebase Hosting
-
-## Next Steps
-
-1. ✅ Complete environment configuration
-2. ✅ Setup MongoDB database
-3. ✅ Configure Firebase (optional)
-4. ✅ Configure Twilio (optional)
-5. ✅ Test with webcam
-6. ✅ Add patients and rooms
-7. ✅ Start monitoring!
-
-## Need Help?
-
-- Check the main README.md for detailed documentation
-- Review API docs at http://localhost:8000/docs
-- Open an issue on GitHub
+### 5. Test Live CCTV Vision Detection (10-Second Hand Raise)
+1. Open `http://localhost:5173` and navigate to **Screen Monitoring** (`/screen-capture`).
+2. Select your camera and click **Start CCTV Monitoring**.
+3. Raise your hand in front of the camera:
+   - MediaPipe will detect the raised wrist above shoulder level.
+   - The on-screen tracking timer will count: `1.0s`, `2.0s`, ..., up to `10.0s`.
+   - Lowering your hand resets the timer immediately.
+   - Holding your hand continuously for **$\ge$ 10.0 seconds** triggers a confirmed distress alert and dispatches emergency notifications to the on-duty nurse.
 
 ---
 
-**Ready to save lives with AI! 🚀**
+## 🔍 Service Ports Overview
+
+| Component | Protocol | Port | URL / Path |
+| :--- | :--- | :--- | :--- |
+| **FastAPI Backend** | HTTP | `8000` | `http://localhost:8000` |
+| **API Docs (Swagger)**| HTTP | `8000` | `http://localhost:8000/docs` |
+| **WebSocket Stream** | WS | `8000` | `ws://localhost:8000/ws` |
+| **Vite Frontend** | HTTP | `5173` | `http://localhost:5173` |

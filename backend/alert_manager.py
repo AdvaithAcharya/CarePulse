@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
-from collections import defaultdict
+from bson import ObjectId
 
 try:
     import firebase_admin
@@ -25,9 +25,17 @@ except ImportError:
 
 from config import settings
 from database import database
-from models import Alert, AlertStatus, AlertLog, Contact
+from models import Alert, AlertStatus, AlertLog
 
 logger = logging.getLogger(__name__)
+
+
+def _to_object_id(val: str):
+    """Safely convert string to ObjectId if possible"""
+    try:
+        return ObjectId(val)
+    except Exception:
+        return val
 
 
 class AlertManager:
@@ -77,7 +85,7 @@ class AlertManager:
     
     async def create_alert(self, alert: Alert) -> str:
         """
-        Create and activate a new alert
+        Create and activate a new alert (with global deduplication)
         
         Args:
             alert: Alert object
@@ -86,8 +94,29 @@ class AlertManager:
             Alert ID
         """
         try:
-            # Save to database
             collection = database.get_collection("alerts")
+            
+            # Global Deduplication & Cooldown (120 seconds per room/patient & alert_type)
+            two_mins_ago = datetime.utcnow() - timedelta(seconds=120)
+            dedup_query = {
+                "alert_type": alert.alert_type,
+                "$or": [
+                    {"status": AlertStatus.ACTIVE},
+                    {"acknowledged": False},
+                    {"timestamp": {"$gte": two_mins_ago}}
+                ]
+            }
+            if alert.room_id:
+                dedup_query["room_id"] = alert.room_id
+            if hasattr(alert, 'patient_id') and alert.patient_id:
+                dedup_query["patient_id"] = alert.patient_id
+
+            existing = await collection.find_one(dedup_query)
+            if existing:
+                logger.info(f"Duplicate alert suppressed for room {alert.room_id} / patient {getattr(alert, 'patient_id', None)}. Existing alert: {existing['_id']}")
+                return str(existing["_id"])
+
+            # Save to database
             alert_dict = alert.model_dump(by_alias=True, exclude={"id"})
             result = await collection.insert_one(alert_dict)
             alert_id = str(result.inserted_id)
@@ -123,7 +152,7 @@ class AlertManager:
             Success status
         """
         try:
-            from bson import ObjectId
+            query_id = _to_object_id(alert_id)
             
             # Try to get from active alerts first
             alert = self.active_alerts.get(alert_id)
@@ -132,13 +161,13 @@ class AlertManager:
             if not alert:
                 logger.info(f"Alert {alert_id} not in memory, loading from database")
                 collection = database.get_collection("alerts")
-                doc = await collection.find_one({"_id": ObjectId(alert_id)})
+                doc = await collection.find_one({"$or": [{"_id": query_id}, {"_id": alert_id}]})
                 if not doc:
                     logger.warning(f"Alert {alert_id} not found in database")
                     return False
                 # Just update the database directly since alert is not in active processing
                 result = await collection.update_one(
-                    {"_id": ObjectId(alert_id)},
+                    {"$or": [{"_id": query_id}, {"_id": alert_id}]},
                     {"$set": {
                         "acknowledged": True,
                         "acknowledged_by": acknowledged_by,
@@ -164,7 +193,7 @@ class AlertManager:
             # Update database
             collection = database.get_collection("alerts")
             await collection.update_one(
-                {"_id": alert_id},
+                {"$or": [{"_id": query_id}, {"_id": alert_id}]},
                 {"$set": {
                     "acknowledged": True,
                     "acknowledged_by": acknowledged_by,
@@ -204,9 +233,15 @@ class AlertManager:
             Success status
         """
         try:
+            query_id = _to_object_id(alert_id)
             alert = self.active_alerts.get(alert_id)
             if not alert:
-                return False
+                collection = database.get_collection("alerts")
+                await collection.update_one(
+                    {"$or": [{"_id": query_id}, {"_id": alert_id}]},
+                    {"$set": {"status": AlertStatus.RESOLVED}}
+                )
+                return True
             
             # Update status
             alert.status = AlertStatus.RESOLVED
@@ -214,7 +249,7 @@ class AlertManager:
             # Update database
             collection = database.get_collection("alerts")
             await collection.update_one(
-                {"_id": alert_id},
+                {"$or": [{"_id": query_id}, {"_id": alert_id}]},
                 {"$set": {"status": AlertStatus.RESOLVED}}
             )
             
@@ -238,61 +273,17 @@ class AlertManager:
             return False
     
     async def _process_alert(self, alert_id: str):
-        """
-        Process alert with escalation logic
-        
-        Args:
-            alert_id: Alert ID
-        """
+        """Process alert notification to active contacts without escalation/leveling loop"""
         try:
             alert = self.active_alerts.get(alert_id)
             if not alert:
                 return
             
-            # Get contacts sorted by priority
+            # Get active contacts
             contacts = await self._get_contacts()
             
-            escalation_level = 0
-            while not alert.acknowledged and escalation_level < settings.MAX_ESCALATION_ATTEMPTS:
-                # Send notifications to contacts at this escalation level
-                await self._send_notifications(alert, contacts, escalation_level)
-                
-                # Update escalation level
-                alert.escalation_level = escalation_level
-                alert.last_escalation_at = datetime.utcnow()
-                alert.status = AlertStatus.ESCALATED if escalation_level > 0 else AlertStatus.ACTIVE
-                
-                # Update database
-                collection = database.get_collection("alerts")
-                await collection.update_one(
-                    {"_id": alert_id},
-                    {"$set": {
-                        "escalation_level": escalation_level,
-                        "last_escalation_at": alert.last_escalation_at,
-                        "status": alert.status
-                    }}
-                )
-                
-                # Log escalation
-                await self._log_alert_action(
-                    alert_id, "escalated", None,
-                    f"Alert escalated to level {escalation_level}"
-                )
-                
-                logger.warning(f"Alert {alert_id} escalated to level {escalation_level}")
-                
-                # Wait for acknowledgment or timeout
-                await asyncio.sleep(settings.ALERT_ESCALATION_TIMEOUT)
-                
-                escalation_level += 1
-            
-            # If still not acknowledged after all attempts
-            if not alert.acknowledged:
-                logger.critical(f"Alert {alert_id} reached maximum escalation without acknowledgment!")
-                await self._log_alert_action(
-                    alert_id, "max_escalation", None,
-                    "Alert reached maximum escalation level"
-                )
+            # Send notification immediately to active contacts
+            await self._send_notifications(alert, contacts, 0)
         
         except asyncio.CancelledError:
             logger.info(f"Alert processing cancelled for {alert_id}")
@@ -373,7 +364,7 @@ class AlertManager:
             twiml = f"""
             <Response>
                 <Say voice="alice">
-                    Attention. This is GuardianAI Alert System.
+                    Attention. This is CarePulse Alert System.
                     {alert.alert_type} alert detected in room {alert.room_id}.
                     {alert.description}.
                     Please acknowledge this alert immediately.
@@ -399,19 +390,26 @@ class AlertManager:
         """Get all active contacts sorted by priority"""
         try:
             collection = database.get_collection("contacts")
-            cursor = collection.find({"active": True}).sort("priority", 1)
+            cursor = collection.find({}).sort("priority", 1)
             contacts = []
             
             async for doc in cursor:
+                active_val = doc.get("active")
+                is_active = True if active_val is None else (
+                    active_val.lower() in ("true", "1", "yes") if isinstance(active_val, str) else bool(active_val)
+                )
+                if not is_active:
+                    continue
+
                 contact_dict = {
-                    "id": str(doc["_id"]),
-                    "name": doc.get("name", ""),
-                    "role": doc.get("role", ""),
-                    "phone_number": doc.get("phone_number", ""),
+                    "id": str(doc.get("_id", "")),
+                    "name": doc.get("name") or doc.get("contact_name") or doc.get("full_name") or doc.get("username") or "Unnamed Contact",
+                    "role": str(doc.get("role") or "nurse").lower(),
+                    "phone_number": doc.get("phone_number") or doc.get("phone") or doc.get("mobile") or doc.get("phone_no") or "",
                     "firebase_token": doc.get("firebase_token"),
                     "email": doc.get("email"),
                     "priority": doc.get("priority", 1),
-                    "active": doc.get("active", True)
+                    "active": is_active
                 }
                 contacts.append(contact_dict)
             
