@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["*"]  # Allow all origins (update for production)
     
     # MongoDB
-    MONGODB_URL: str = "mongodb+srv://advaith23cs005_db_user:advaith2316@cluster1.1tuvby8.mongodb.net/?appName=Cluster1"
-    MONGO_URI: str = "mongodb+srv://advaith23cs005_db_user:advaith2316@cluster1.1tuvby8.mongodb.net/?appName=Cluster1"
+    MONGODB_URL: str = ""
+    MONGO_URI: str = ""
     MONGODB_DB_NAME: str = "carepulse"
     
     # Firebase
