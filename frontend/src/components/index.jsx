@@ -1,6 +1,7 @@
 // Sidebar.jsx
 import { PageLayout, GlassCard } from './SharedLayout';
 import { LiquidMetalButton } from './ui/LiquidMetal';
+import { API_BASE } from '../config';
 
 export function Sidebar() {
   return (
@@ -94,7 +95,7 @@ export function AlertsPanel({ alerts = [], onAlertsUpdate }) {
     }
     
     try {
-      const response = await fetch(`http://localhost:8000/api/alerts/${alertId}/acknowledge`, {
+      const response = await fetch(`${API_BASE}/api/alerts/${alertId}/acknowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ acknowledged_by: 'Nurse Admin' })
@@ -116,7 +117,7 @@ export function AlertsPanel({ alerts = [], onAlertsUpdate }) {
     setDeletingId(alertId);
     setConfirmDeleteId(null);
     try {
-      const response = await fetch(`http://localhost:8000/api/alerts/${alertId}`, {
+      const response = await fetch(`${API_BASE}/api/alerts/${alertId}`, {
         method: 'DELETE'
       });
       if (response.ok) {
@@ -138,7 +139,7 @@ export function AlertsPanel({ alerts = [], onAlertsUpdate }) {
     setIsClearingAll(true);
     setConfirmDeleteAll(false);
     try {
-      const response = await fetch('http://localhost:8000/api/alerts/clear', {
+      const response = await fetch(`${API_BASE}/api/alerts/clear`, {
         method: 'DELETE'
       });
       if (response.ok) {

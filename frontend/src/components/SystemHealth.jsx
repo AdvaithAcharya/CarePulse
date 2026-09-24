@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { exportSystemHealthReport } from '../utils/exportUtils';
 import { PageLayout, GlassCard } from './SharedLayout';
 import { LiquidMetalBorder, LiquidMetalButton } from './ui/LiquidMetal';
+import { API_BASE } from '../config';
 
 export const SystemHealth = () => {
   const [health, setHealth] = useState({
@@ -33,7 +34,7 @@ export const SystemHealth = () => {
     
     try {
       // Check API health
-      const response = await fetch('http://localhost:8000/health');
+      const response = await fetch(`${API_BASE}/health`);
       const apiResponseTime = Date.now() - startTime;
       
       if (response.ok) {
@@ -59,7 +60,7 @@ export const SystemHealth = () => {
 
     // Fetch alerts count
     try {
-      const alertsRes = await fetch('http://localhost:8000/api/alerts');
+      const alertsRes = await fetch(`${API_BASE}/api/alerts`);
       if (alertsRes.ok) {
         const alerts = await alertsRes.json();
         setHealth(prev => ({

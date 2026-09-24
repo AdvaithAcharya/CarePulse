@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-
-const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const API_BASE = `http://${host}:8000`;
+import { API_BASE } from '../config';
 
 export function VideoGrid() {
   const [rooms, setRooms] = useState([]);

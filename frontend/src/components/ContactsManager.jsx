@@ -3,9 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { PageLayout, GlassCard } from './SharedLayout';
 import { LiquidMetalBorder, LiquidMetalButton } from './ui/LiquidMetal';
-
-const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const API_BASE = `http://${host}:8000`;
+import { API_BASE } from '../config';
 
 export function ContactsManager() {
   const [contacts, setContacts] = useState([]);

@@ -1,10 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { LiquidMetalButton } from './ui/LiquidMetal';
-
-const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const API_BASE = `http://${host}:8000`;
-const WS_BASE = `ws://${host}:8000`;
+import { API_BASE, WS_BASE } from '../config';
 
 export function MobileCamera() {
   const [rooms, setRooms] = useState([]);

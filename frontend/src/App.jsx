@@ -13,6 +13,7 @@ import { ToastProvider } from './contexts/ToastContext';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import alertSoundManager from './utils/alertSounds';
 import { exportAlertsToCSV } from './utils/exportUtils';
+import { API_BASE, WS_BASE } from './config';
 
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
@@ -40,9 +41,8 @@ function AppContent() {
 
   // WebSocket connection
   useEffect(() => {
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
     const connectWebSocket = () => {
-      const websocket = new WebSocket(`ws://${host}:8000/ws`);
+      const websocket = new WebSocket(`${WS_BASE}/ws`);
 
       websocket.onopen = () => {};
 
@@ -75,8 +75,7 @@ function AppContent() {
 
   const fetchAlerts = async () => {
     try {
-      const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-      const response = await fetch(`http://${host}:8000/api/alerts`);
+      const response = await fetch(`${API_BASE}/api/alerts`);
       const data = await response.json();
       setAlerts(data);
     } catch (error) {

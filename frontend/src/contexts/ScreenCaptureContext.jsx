@@ -2,11 +2,9 @@ import React, { createContext, useContext, useState, useRef, useEffect } from 'r
 import axios from 'axios';
 import { useToast } from './ToastContext';
 
-const ScreenCaptureContext = createContext();
+import { API_BASE, WS_BASE } from '../config';
 
-const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const API_BASE = `http://${host}:8000`;
-const WS_BASE = `ws://${host}:8000`;
+const ScreenCaptureContext = createContext();
 const MONITORING_SESSION_ID = 'screen-monitor-session';
 
 export function ScreenCaptureProvider({ children }) {
