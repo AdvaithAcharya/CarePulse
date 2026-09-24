@@ -1,6 +1,6 @@
 # Care Pulse – Intelligent Patient Distress Detection System for Hospital Wards
 
-![Care Pulse Banner](care-pulse-jade.vercel.app)
+![Care Pulse Banner](https://img.shields.io/badge/Care%20Pulse-Patient%20Safety-blue)
 ![Python](https://img.shields.io/badge/Python-3.8+-green)
 ![React](https://img.shields.io/badge/React-18+-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688)
